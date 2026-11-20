@@ -1,0 +1,6 @@
+{
+  "name": "OfflineSync",
+  "description": "Reusable offline-first mobile data synchronization framework with conflict resolution, demonstrated through OfflineShop and OfflineSync Monitor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

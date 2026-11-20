@@ -1,0 +1,62 @@
+{
+  "database": "offlinesync",
+  "collections": {
+    "products": {
+      "description": "Authoritative product catalog with monotonic version numbers for conflict & staleness detection.",
+      "primaryKey": "productId",
+      "required": ["productId", "sku", "name", "category", "price", "stock", "version", "updatedAt"]
+    },
+    "orders": {
+      "description": "Document-based orders with embedded line items and unique clientOrderId idempotency key.",
+      "primaryKey": "orderId",
+      "uniqueKeys": ["clientOrderId"],
+      "required": ["orderId", "clientOrderId", "deviceId", "status", "items", "deliveryAddressId", "paymentIntent", "version"]
+    },
+    "carts": {
+      "description": "Synchronized cart documents supporting operation-based delta updates and versioned snapshots.",
+      "primaryKey": "cartId",
+      "required": ["cartId", "items", "version", "updatedAt"]
+    },
+    "wishlists": {
+      "description": "Synchronized wishlist product sets per client profile.",
+      "primaryKey": "wishlistId",
+      "required": ["wishlistId", "productIds", "version", "updatedAt"]
+    },
+    "addresses": {
+      "description": "Cached delivery addresses used during offline checkout preparation.",
+      "primaryKey": "addressId",
+      "required": ["addressId", "recipientName", "street", "city", "postalCode", "version"]
+    },
+    "devices": {
+      "description": "Registered synchronization client devices, checkpoints, and connection telemetry.",
+      "primaryKey": "deviceId",
+      "required": ["deviceId", "deviceName", "appId", "registeredAt", "connectionStatus", "lastCursor"]
+    },
+    "sync_operations": {
+      "description": "Idempotent processed operation ledger keyed uniquely by operationId.",
+      "primaryKey": "operationId",
+      "uniqueKeys": ["operationId"],
+      "required": ["operationId", "deviceId", "appId", "entityType", "entityId", "operationType", "sequence", "baseVersion", "status"]
+    },
+    "sync_sessions": {
+      "description": "Audit trail of synchronization sessions, batch outcomes, latency, and byte transfer metrics.",
+      "primaryKey": "sessionId",
+      "required": ["sessionId", "deviceId", "appId", "startedAt", "operationsSent", "operationsAcknowledged", "result"]
+    },
+    "sync_metadata": {
+      "description": "Global monotonic sync cursor and framework checkpoints.",
+      "primaryKey": "key",
+      "required": ["key", "value", "updatedAt"]
+    },
+    "conflicts": {
+      "description": "Policy-evaluated conflict records preserving local payload, server state, policy, and resolution history.",
+      "primaryKey": "conflictId",
+      "required": ["conflictId", "operationId", "entityType", "entityId", "localVersion", "remoteVersion", "conflictType", "resolutionStatus", "resolutionPolicy"]
+    },
+    "sync_events": {
+      "description": "Structured telemetry event stream feeding OfflineSync Monitor logs and SSE.",
+      "primaryKey": "eventId",
+      "required": ["eventId", "deviceId", "appId", "eventType", "timestamp", "severity"]
+    }
+  }
+}

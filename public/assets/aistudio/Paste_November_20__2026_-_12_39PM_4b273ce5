@@ -1,0 +1,1274 @@
+# PROJECT: OFFLINESYNC
+
+## Design and Development of a Reusable Offline-First Mobile Data Synchronization Framework with Conflict Resolution
+
+Act as a senior full-stack engineer, distributed systems architect, mobile computing researcher, and software testing engineer.
+
+Build a complete, runnable software project named **OfflineSync**, demonstrated through a realistic e-commerce application called **OfflineShop**.
+
+This is not merely an e-commerce website. The primary contribution is a reusable offline-first synchronization framework. OfflineShop is the end-user application used to demonstrate the framework. A separate OfflineSync Monitor dashboard must expose and visualize the framework's internal synchronization behavior.
+
+I want a functional implementation, not just a design, mockup, code snippets, or a project plan.
+
+---
+
+# 1. PROJECT VISION
+
+Develop a reusable synchronization framework that allows applications to continue operating when network connectivity is unavailable.
+
+The demonstration application will be an e-commerce application where a user can:
+
+- Browse locally cached products.
+- Search cached products.
+- View product details.
+- Add products to a cart.
+- Update cart quantities.
+- Remove products.
+- Add items to a wishlist.
+- Select cached addresses.
+- Prepare checkout.
+- Create an offline order intent.
+- View local order history.
+- Continue working while offline.
+
+When network connectivity returns, OfflineSync must synchronize queued operations with the backend.
+
+The system must detect, handle and record synchronization failures, duplicate operations, interrupted synchronization and conflicts.
+
+The framework must be designed so that it can eventually be reused in other applications and ported to Android.
+
+---
+
+# 2. THE THREE MAIN SYSTEM COMPONENTS
+
+The project must contain three independent components.
+
+## COMPONENT A — OfflineShop
+
+An end-user e-commerce application.
+
+Users should interact with it like a normal shopping application.
+
+It must support:
+
+- Home page.
+- Product catalogue.
+- Product search.
+- Product details.
+- Categories.
+- Cart.
+- Wishlist.
+- Checkout.
+- Offline order preparation.
+- Orders.
+- Order details.
+- Connection status.
+- Synchronization status.
+
+The application must work with cached data during offline periods.
+
+The user should not need to manually manage the synchronization queue.
+
+---
+
+## COMPONENT B — OfflineSync Monitor
+
+A separate developer/admin dashboard used to monitor the framework.
+
+This dashboard must be independent from the OfflineShop UI.
+
+Implement the following pages.
+
+### Dashboard overview
+
+Display:
+
+- Total devices.
+- Active devices.
+- Offline devices.
+- Pending operations.
+- Successful operations.
+- Failed operations.
+- Conflicts.
+- Synchronization sessions.
+- Synchronization success rate.
+- Average synchronization latency.
+- Last synchronization time.
+
+Do not fabricate live metrics. Display actual values from backend records. If there are no records, display zero or an empty state.
+
+### Devices
+
+Display:
+
+- Device ID.
+- Device name.
+- Application ID.
+- Last synchronization time.
+- Connection status.
+- Pending operation count.
+- Device registration date.
+
+Allow opening a device details page.
+
+### Operation Queue
+
+Display:
+
+- Operation ID.
+- Device ID.
+- Operation type.
+- Entity type.
+- Entity ID.
+- Creation time.
+- Status.
+- Retry count.
+
+Filters:
+
+- Pending.
+- Processing.
+- Acknowledged.
+- Failed.
+- Requires action.
+
+### Synchronization Sessions
+
+Display:
+
+- Session ID.
+- Device ID.
+- Start time.
+- End time.
+- Operations sent.
+- Operations acknowledged.
+- Operations rejected.
+- Errors.
+- Session result.
+
+### Conflict Center
+
+Display:
+
+- Conflict ID.
+- Entity type.
+- Entity ID.
+- Local version.
+- Remote version.
+- Conflict type.
+- Resolution status.
+- Resolution policy.
+- Resolution time.
+
+Provide a conflict detail view showing local and remote versions.
+
+### Logs
+
+Provide a live or periodically refreshed synchronization event log.
+
+Example events:
+
+- DEVICE_REGISTERED
+- NETWORK_OFFLINE
+- NETWORK_ONLINE
+- OPERATION_CREATED
+- SYNC_STARTED
+- BATCH_SENT
+- OPERATION_ACKNOWLEDGED
+- OPERATION_REJECTED
+- DUPLICATE_DETECTED
+- CONFLICT_DETECTED
+- CONFLICT_RESOLVED
+- RETRY_SCHEDULED
+- SYNC_COMPLETED
+
+### Experiments
+
+Provide a section for measuring framework performance and reliability.
+
+Display:
+
+- Synchronization latency.
+- Operations per batch.
+- Synchronization success rate.
+- Retry count.
+- Duplicate processing prevention.
+- Recovery after interruption.
+- Conflict count.
+- Bytes transferred if measurable.
+
+Include the ability to run controlled synchronization tests where possible.
+
+---
+
+## COMPONENT C — OfflineSync Backend
+
+Build a reusable synchronization backend, not an e-commerce-only backend.
+
+The backend must contain a generic synchronization core and a separate e-commerce business adapter.
+
+### Generic OfflineSync Core
+
+Implement:
+
+- Device registration.
+- Synchronization API.
+- Push operations.
+- Pull remote changes.
+- Operation validation.
+- Idempotency.
+- Persistent operation processing.
+- Sync cursors/checkpoints.
+- Version metadata.
+- Conflict detection.
+- Conflict policy interface.
+- Reconciliation.
+- Acknowledgements.
+- Retry handling.
+- Sync history.
+- Sync telemetry.
+- Event logging.
+
+### OfflineShop Business Adapter
+
+Implement:
+
+- Product validation.
+- Price validation.
+- Stock validation.
+- Cart-related operations.
+- Checkout validation.
+- Order intent processing.
+- Server-side order creation.
+- Order status updates.
+
+Do not place e-commerce business logic inside the generic OfflineSync core.
+
+---
+
+# 3. TECHNOLOGY STACK
+
+Use the following stack unless there is a compelling technical reason to change something.
+
+## Frontend
+
+- React.
+- TypeScript.
+- Vite.
+- Tailwind CSS.
+- React Router.
+- IndexedDB.
+- Use a suitable IndexedDB abstraction such as Dexie.
+- Use a lightweight state management solution where necessary.
+
+Both OfflineShop and OfflineSync Monitor should use React and TypeScript but be separate applications.
+
+## Client Synchronization Engine
+
+Create a reusable TypeScript package/module:
+
+offlinesync-client
+
+This package must not depend on OfflineShop's UI or business logic.
+
+It must provide reusable interfaces and functionality for:
+
+- Local data storage abstractions.
+- Operation creation.
+- Persistent operation queue.
+- Network monitoring.
+- Synchronization coordination.
+- Push synchronization.
+- Pull synchronization.
+- Retry management.
+- Conflict detection.
+- Conflict policy interfaces.
+- Reconciliation.
+- Sync status.
+- Event telemetry.
+
+## Backend
+
+- Python.
+- FastAPI.
+- Pydantic.
+- Async support where appropriate.
+- MongoDB.
+- Motor or the currently appropriate MongoDB async approach; choose a maintained approach compatible with the selected Python/MongoDB versions.
+- MongoDB indexes.
+- Environment configuration.
+
+## Database
+
+MongoDB.
+
+Use document-based schemas.
+
+## Communication
+
+- REST.
+- JSON.
+- HTTP.
+- WebSocket or Server-Sent Events for Monitor updates if feasible.
+- Polling is acceptable as an initial fallback.
+
+---
+
+# 4. SYSTEM ARCHITECTURE
+
+Implement the following architecture.
+
+OfflineShop UI
+    |
+    v
+OfflineSync Client Engine
+    |
+    +---- Local Database: IndexedDB
+    |
+    +---- Persistent Operation Queue
+    |
+    +---- Network Monitor
+    |
+    +---- Synchronization Coordinator
+                |
+                v
+          REST Synchronization API
+                |
+                v
+          OfflineSync Backend
+                |
+                +---- Device Registry
+                |
+                +---- Operation Processor
+                |
+                +---- Idempotency Service
+                |
+                +---- Sync Coordinator
+                |
+                +---- Conflict Detector
+                |
+                +---- Conflict Resolver
+                |
+                +---- Reconciliation Engine
+                |
+                +---- Persistence Layer
+                |
+                +---- Telemetry / Logs
+                |
+                v
+              MongoDB
+
+OfflineSync Monitor
+    |
+    +---- Monitoring API
+    +---- Devices
+    +---- Operations
+    +---- Sessions
+    +---- Conflicts
+    +---- Logs
+    +---- Metrics
+
+OfflineShop Business Adapter
+    |
+    +---- Products
+    +---- Cart
+    +---- Checkout
+    +---- Orders
+    +---- Inventory Validation
+
+---
+
+# 5. OFFLINE-FIRST REQUIREMENTS
+
+Offline-first behavior must be genuine.
+
+The application must not simply display an offline toggle while continuing to depend on the server.
+
+The local database must support:
+
+- Cached product catalogue.
+- Cached product details.
+- Cached categories.
+- Local cart.
+- Local wishlist.
+- Local checkout information.
+- Local order intents.
+- Local operation queue.
+- Sync metadata.
+- Cached server records.
+- Local activity history.
+
+The frontend should prioritize local reads.
+
+Whenever possible:
+
+1. Read from IndexedDB.
+2. Display data immediately.
+3. Synchronize in the background.
+4. Update the local database with server changes.
+5. Update UI state.
+
+When offline:
+
+- Product browsing must use cached products.
+- Cart operations must work.
+- Wishlist operations must work.
+- Checkout preparation must work.
+- Order intent creation must work.
+- Operations must persist across refreshes.
+- The user must not lose locally created data.
+
+Implement network connectivity detection.
+
+Do not rely solely on navigator.onLine for determining whether synchronization requests actually work.
+
+Handle failed requests even when the browser reports online.
+
+---
+
+# 6. OPERATION-BASED SYNCHRONIZATION
+
+Use a persistent operation queue.
+
+Operations must have unique IDs.
+
+Example operation:
+
+{
+  "operationId": "uuid",
+  "deviceId": "device-id",
+  "entityType": "cart",
+  "entityId": "cart-id",
+  "operationType": "CART_ITEM_ADD",
+  "sequence": 1,
+  "baseVersion": 0,
+  "createdAt": "ISO timestamp",
+  "payload": {},
+  "status": "PENDING",
+  "retryCount": 0
+}
+
+Define a proper operation schema.
+
+Operation statuses:
+
+- PENDING.
+- PROCESSING.
+- ACKNOWLEDGED.
+- FAILED.
+- REQUIRES_ACTION.
+
+Operations must persist across page refreshes and browser restarts.
+
+Implement:
+
+- Unique operation IDs.
+- Operation ordering where required.
+- Batch synchronization.
+- Retry.
+- Retry backoff.
+- Idempotent processing.
+- Acknowledgement.
+- Failure handling.
+- Operation dependencies where required.
+- Recovery from interrupted synchronization.
+
+Do not remove an operation from the local queue until the backend confirms its outcome.
+
+Handle duplicate operation delivery safely.
+
+The backend must be able to receive the same operation more than once without creating duplicate business records.
+
+Use MongoDB unique indexes for idempotency where appropriate.
+
+---
+
+# 7. SYNCHRONIZATION PROTOCOL
+
+Design and implement a protocol for bidirectional synchronization.
+
+The client should send:
+
+- Device ID.
+- Application ID.
+- Synchronization session ID.
+- Last synchronization cursor/checkpoint.
+- Batch of operations.
+- Relevant version metadata.
+
+The backend should return:
+
+- Session ID.
+- Acknowledged operation IDs.
+- Rejected operation IDs.
+- Operation-specific outcomes.
+- Conflict information.
+- Remote changes.
+- Updated synchronization cursor.
+- Server timestamp.
+
+Implement incremental pull synchronization.
+
+Avoid transferring the entire dataset during every synchronization.
+
+Use server-generated synchronization cursors, sequence values, or another well-defined incremental mechanism.
+
+Document the protocol.
+
+Implement API endpoints similar to:
+
+POST /api/sync/register-device
+
+POST /api/sync/push
+
+POST /api/sync/pull
+
+POST /api/sync/process
+
+GET /api/sync/status
+
+GET /api/sync/sessions
+
+GET /api/sync/operations
+
+GET /api/sync/devices
+
+GET /api/sync/conflicts
+
+POST /api/sync/conflicts/{id}/resolve
+
+GET /api/monitor/metrics
+
+GET /api/monitor/logs
+
+GET /api/monitor/events
+
+Modify the endpoint design if needed, but document it.
+
+---
+
+# 8. ORDER DOCUMENT MODEL
+
+MongoDB should use document-based orders.
+
+Example local order:
+
+{
+  "clientOrderId": "unique-client-order-id",
+  "status": "PENDING_SYNC",
+  "items": [
+    {
+      "productId": "P101",
+      "name": "Product A",
+      "quantity": 2,
+      "priceAtCheckout": 799
+    }
+  ],
+  "deliveryAddressId": "address-id",
+  "paymentIntent": {
+    "method": "COD",
+    "status": "NOT_PROCESSED"
+  },
+  "createdLocallyAt": "timestamp",
+  "syncStatus": "PENDING"
+}
+
+This represents a local order intent, not a confirmed order.
+
+The server must construct or validate the authoritative order.
+
+The server must not trust the client's prices, inventory, totals, payment status, or order status.
+
+The backend must validate:
+
+- Product IDs.
+- Product availability.
+- Current price.
+- Quantity.
+- Inventory.
+- Delivery data.
+- Order totals.
+- Payment status.
+
+If prices or stock changed:
+
+- Do not silently accept invalid values.
+- Return a meaningful result.
+- Allow the client to update or request user action.
+
+Use clientOrderId as an idempotency mechanism to prevent duplicate order creation.
+
+The server should distinguish:
+
+- PENDING_SYNC.
+- SYNCING.
+- SERVER_ACCEPTED.
+- CONFIRMED.
+- REJECTED.
+- REQUIRES_ACTION.
+- CANCELLED.
+
+Payment must never be falsely marked successful while offline.
+
+Implement COD for the demonstration initially.
+
+Payment gateway integration is optional and should not delay core synchronization functionality.
+
+---
+
+# 9. CONFLICT DETECTION AND RESOLUTION
+
+Conflict handling must not simply be implemented as unconditional Last-Write-Wins.
+
+Implement a policy-based conflict architecture.
+
+Define:
+
+- Conflict detection.
+- Conflict record.
+- Local version.
+- Server version.
+- Conflict type.
+- Resolution strategy.
+- Resolution result.
+- Resolution history.
+
+The framework should support configurable conflict strategies such as:
+
+- Last-Write-Wins where appropriate.
+- Manual resolution.
+- Custom domain-specific resolver.
+
+Use deterministic tie-breaking when using Last-Write-Wins.
+
+Do not depend solely on client clocks for correctness.
+
+Use server versions, sequence metadata or causal metadata where appropriate.
+
+For the initial implementation:
+
+- Use version numbers or revision metadata for records.
+- Implement server-side conflict detection.
+- Provide a manual conflict resolution workflow in OfflineSync Monitor.
+- Implement safe conflict handling for cart/order business rules.
+
+Demonstrate conflicts by simulating two clients/devices editing the same record.
+
+For orders:
+
+- Do not merge two order submissions into one silently.
+- Do not duplicate order creation.
+- Revalidate inventory and prices.
+- Preserve client order IDs.
+- Require action when validation fails.
+
+For inventory:
+
+- The server is authoritative.
+- Never use client-side Last-Write-Wins to overwrite authoritative stock.
+
+For cart quantities:
+
+- Define the behavior explicitly.
+- Avoid blindly overwriting quantity changes.
+- Consider operation-based increment/decrement behavior or a domain-specific resolver.
+
+Document all policies and their limitations.
+
+---
+
+# 10. NETWORK AND RECOVERY REQUIREMENTS
+
+Implement:
+
+- Online/offline detection.
+- Connectivity recovery.
+- Retry.
+- Exponential backoff.
+- Persistent queue.
+- Interrupted synchronization recovery.
+- Duplicate operation handling.
+- Request timeout.
+- Failure logging.
+- Network error handling.
+- Sync session lifecycle.
+
+When connectivity returns:
+
+1. Detect recovery.
+2. Start synchronization.
+3. Process pending operations.
+4. Push batches.
+5. Receive acknowledgements.
+6. Pull remote changes.
+7. Reconcile local state.
+8. Update the local database.
+9. Update the operation queue.
+10. Record metrics.
+11. Complete the sync session.
+
+Synchronization must not block the user interface.
+
+Do not create endless retry loops.
+
+Use retry limits and appropriate backoff.
+
+---
+
+# 11. MONITORING AND TELEMETRY
+
+Implement real telemetry from the client and backend.
+
+Each event should have fields such as:
+
+{
+  "eventId": "uuid",
+  "deviceId": "device-id",
+  "sessionId": "session-id",
+  "eventType": "SYNC_STARTED",
+  "timestamp": "ISO timestamp",
+  "severity": "INFO",
+  "metadata": {}
+}
+
+Events should include:
+
+- DEVICE_REGISTERED.
+- NETWORK_OFFLINE.
+- NETWORK_ONLINE.
+- OPERATION_CREATED.
+- OPERATION_QUEUED.
+- SYNC_STARTED.
+- BATCH_SENT.
+- OPERATION_ACKNOWLEDGED.
+- OPERATION_REJECTED.
+- DUPLICATE_DETECTED.
+- CONFLICT_DETECTED.
+- CONFLICT_RESOLVED.
+- RETRY_SCHEDULED.
+- SYNC_COMPLETED.
+- SYNC_FAILED.
+
+OfflineSync Monitor must display real events and metrics.
+
+Do not use fake metrics in the final implementation.
+
+If metrics cannot yet be measured, explicitly label them unavailable.
+
+---
+
+# 12. DATABASE COLLECTIONS
+
+Create appropriate MongoDB collections and indexes.
+
+Suggested collections:
+
+products
+
+orders
+
+users
+
+devices
+
+sync_operations
+
+sync_sessions
+
+sync_metadata
+
+conflicts
+
+sync_events
+
+Design proper schemas.
+
+Create:
+
+- Unique indexes.
+- Idempotency indexes.
+- Device indexes.
+- Status indexes.
+- Timestamp indexes.
+- Query-efficient indexes.
+
+Avoid unnecessary duplication, but use MongoDB document embedding appropriately for order items.
+
+Document the schema.
+
+---
+
+# 13. APPLICATION DESIGN
+
+OfflineShop should be a polished, realistic e-commerce application.
+
+UI design:
+
+- Responsive.
+- Modern.
+- Clean.
+- Mobile-friendly.
+- Accessible.
+- Consistent.
+- Suitable for a project presentation.
+
+Pages:
+
+- Home.
+- Product catalogue.
+- Product detail.
+- Cart.
+- Checkout.
+- Orders.
+- Order detail.
+- Wishlist.
+
+Include:
+
+- Search.
+- Category filters.
+- Product cards.
+- Cart quantities.
+- Empty states.
+- Loading states.
+- Error states.
+- Offline indicator.
+- Sync indicator.
+- Pending order indication.
+
+OfflineSync Monitor should have a distinct developer-oriented interface.
+
+It should contain:
+
+- Dashboard.
+- Devices.
+- Queue.
+- Sessions.
+- Conflicts.
+- Logs.
+- Metrics.
+- Experiments.
+
+Use charts only when backed by actual collected data.
+
+---
+
+# 14. TESTING
+
+Create automated tests.
+
+## Client tests
+
+Test:
+
+- Local persistence.
+- Queue persistence.
+- Offline operations.
+- Operation creation.
+- Queue ordering.
+- Retry.
+- Sync acknowledgement.
+- Duplicate handling.
+- Local state reconciliation.
+
+## Backend tests
+
+Test:
+
+- Device registration.
+- Push synchronization.
+- Pull synchronization.
+- Idempotency.
+- Duplicate operations.
+- Validation.
+- Conflict detection.
+- Conflict resolution.
+- Order processing.
+- Invalid orders.
+- Interrupted processing where practical.
+
+## Integration tests
+
+Test scenarios:
+
+### Scenario A — Normal synchronization
+
+1. Online.
+2. Create cart operations.
+3. Synchronize.
+4. Verify server state.
+5. Verify acknowledgements.
+
+### Scenario B — Offline shopping
+
+1. Cache products.
+2. Disconnect network.
+3. Add products to cart.
+4. Prepare order.
+5. Refresh browser.
+6. Verify persistence.
+
+### Scenario C — Offline to online
+
+1. Create multiple offline operations.
+2. Reconnect.
+3. Synchronize.
+4. Verify queue processing.
+5. Verify backend records.
+6. Verify local acknowledgements.
+
+### Scenario D — Duplicate delivery
+
+1. Submit an operation.
+2. Submit the same operation again.
+3. Verify that the backend doesn't duplicate processing.
+
+### Scenario E — Interrupted synchronization
+
+1. Begin synchronization.
+2. Simulate failure.
+3. Verify pending operations remain.
+4. Recover.
+5. Retry.
+6. Verify completion.
+
+### Scenario F — Concurrent modifications
+
+1. Simulate two devices.
+2. Modify the same record.
+3. Synchronize.
+4. Detect the conflict.
+5. Resolve.
+6. Verify the final state.
+
+### Scenario G — Invalid order
+
+1. Create offline order.
+2. Change server stock or price.
+3. Synchronize.
+4. Verify validation.
+5. Return appropriate action required.
+
+---
+
+# 15. EXPERIMENTAL EVALUATION
+
+Implement an experimental testing module.
+
+Measure:
+
+- Synchronization latency.
+- Operations per batch.
+- Success rate.
+- Failure rate.
+- Retry count.
+- Duplicate operations prevented.
+- Conflict count.
+- Recovery time.
+- Bytes transferred where measurable.
+- Local operation response time where measurable.
+
+Create reproducible test scenarios.
+
+Do not fabricate experimental values.
+
+Provide exportable CSV data if possible.
+
+Provide charts based on collected measurements.
+
+Experiment scenarios:
+
+- 10 operations.
+- 50 operations.
+- 100 operations.
+- 500 operations.
+
+Test:
+
+- Stable connection.
+- Simulated interruption.
+- Offline backlog.
+- Recovery.
+- Duplicate delivery.
+- Concurrent modification.
+
+If simulated networking tools are unavailable, implement reproducible application-level interruption scenarios and document the limitation.
+
+---
+
+# 16. REUSABILITY REQUIREMENTS
+
+OfflineSync must be designed as a reusable framework.
+
+The client engine must not depend on OfflineShop components.
+
+Define a public API.
+
+Example conceptual usage:
+
+const syncEngine = createOfflineSync({
+  appId: "offline-shop",
+  storage: localStorageAdapter,
+  transport: apiTransport,
+  conflictResolver: resolver
+});
+
+The API should support:
+
+- Registering entities.
+- Creating operations.
+- Reading pending operations.
+- Starting synchronization.
+- Pulling remote changes.
+- Subscribing to events.
+- Registering conflict policies.
+- Querying synchronization status.
+- Registering application adapters.
+
+Provide documentation and examples.
+
+Design the architecture so the engine can later be ported or adapted to Android Kotlin.
+
+Do not claim that the TypeScript web implementation is already an Android SDK.
+
+---
+
+# 17. PROJECT STRUCTURE
+
+Use a modular monorepo.
+
+Suggested structure:
+
+OfflineSync/
+
+apps/
+
+  offline-shop/
+
+  offlinesync-monitor/
+
+packages/
+
+  offlinesync-client/
+
+  offlinesync-types/
+
+backend/
+
+  offlinesync-core/
+
+  shop-adapter/
+
+  api/
+
+  services/
+
+  conflict/
+
+  persistence/
+
+database/
+
+  schemas/
+
+  indexes/
+
+tests/
+
+  client/
+
+  backend/
+
+  integration/
+
+docs/
+
+  architecture/
+
+  protocol/
+
+  data-models/
+
+  testing/
+
+  experiments/
+
+  setup/
+
+Adjust the structure where technically justified, but keep the components separated.
+
+---
+
+# 18. DEVELOPMENT PROCESS
+
+Do not attempt to generate the entire project in one unstructured code dump.
+
+Implement incrementally.
+
+PHASE 1 — Architecture and foundation
+
+- Inspect the environment.
+- Create repository.
+- Create project structure.
+- Create frontend applications.
+- Create backend.
+- Configure MongoDB.
+- Create configuration files.
+- Ensure applications start.
+
+PHASE 2 — OfflineShop
+
+- Product catalogue.
+- Product detail.
+- IndexedDB caching.
+- Search.
+- Cart.
+- Wishlist.
+
+PHASE 3 — OfflineSync client engine
+
+- Local storage abstraction.
+- Persistent operation queue.
+- Network monitor.
+- Operation schemas.
+- Sync coordinator.
+
+PHASE 4 — Backend synchronization core
+
+- Device registration.
+- Push.
+- Pull.
+- Idempotency.
+- Acknowledgements.
+- Sync sessions.
+
+PHASE 5 — Order integration
+
+- Checkout.
+- Order intents.
+- Validation.
+- Server order creation.
+- Stock and price validation.
+
+PHASE 6 — Conflict resolution
+
+- Version metadata.
+- Conflict detection.
+- Policy architecture.
+- Conflict center.
+
+PHASE 7 — OfflineSync Monitor
+
+- Dashboard.
+- Devices.
+- Queue.
+- Sessions.
+- Conflicts.
+- Logs.
+- Metrics.
+
+PHASE 8 — Testing
+
+- Unit tests.
+- Integration tests.
+- Offline scenarios.
+- Interruption.
+- Duplicate processing.
+- Conflict scenarios.
+
+PHASE 9 — Experiments and documentation
+
+- Metrics.
+- CSV export.
+- Charts.
+- Architecture documentation.
+- Protocol documentation.
+- Installation documentation.
+- Demonstration guide.
+
+---
+
+# 19. EXECUTION REQUIREMENTS
+
+If you have filesystem, terminal, coding or agent tools:
+
+- Create the project files directly.
+- Install dependencies.
+- Run the applications.
+- Run automated tests.
+- Fix errors.
+- Verify frontend/backend integration.
+- Verify MongoDB integration.
+- Verify offline behavior.
+- Verify synchronization.
+- Verify duplicate operation handling.
+- Verify conflict scenarios.
+
+Do not merely give instructions.
+
+If an action cannot be executed because your environment lacks tools, state precisely what was not executed.
+
+Do not claim tests passed unless you actually executed them.
+
+Do not fabricate test results.
+
+Keep the implementation lightweight enough for a Windows laptop with 8 GB RAM.
+
+Avoid Docker unless it is genuinely helpful and optional.
+
+Prefer direct local installation and execution.
+
+---
+
+# 20. FINAL DELIVERABLES
+
+Deliver:
+
+1. Complete source code.
+2. OfflineShop frontend.
+3. OfflineSync Monitor frontend.
+4. Reusable OfflineSync client engine.
+5. FastAPI backend.
+6. MongoDB integration.
+7. MongoDB schema/index definitions.
+8. Synchronization protocol.
+9. Conflict-resolution implementation.
+10. Automated tests.
+11. Experimental evaluation module.
+12. CSV export.
+13. README.
+14. Installation guide.
+15. Architecture diagram.
+16. API documentation.
+17. Demonstration scenarios.
+18. Limitations documentation.
+
+The final project must be runnable locally.
+
+---
+
+# IMPORTANT ENGINEERING PRINCIPLES
+
+- The synchronization engine is the main contribution.
+- OfflineShop is the demonstration application.
+- OfflineSync Monitor is a separate monitoring application.
+- The client must genuinely work offline.
+- Local data must persist.
+- The operation queue must persist.
+- Synchronization must be incremental.
+- Operations must be idempotent.
+- Server validation is authoritative.
+- Do not trust client prices or inventory.
+- Do not claim payment success offline.
+- Conflict handling must be domain-aware.
+- Don't blindly use Last-Write-Wins.
+- Don't fake metrics.
+- Don't fake successful tests.
+- Don't use unnecessary architecture.
+- Don't build everything as one giant file.
+- Keep the reusable framework separated from e-commerce logic.
+- Prioritize a working, tested implementation over decorative features.
+
+Start by analyzing the environment and creating Phase 1. Continue through the phases incrementally, maintaining a working application throughout development.
+
+If the project is too large for a single execution session, complete the current phase, preserve all files, create a progress report, and clearly state the next phase to continue.
