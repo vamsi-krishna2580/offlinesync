@@ -8,6 +8,18 @@ import type {
 } from '../../packages/offlinesync-types';
 import type { DocumentCollection } from '../persistence/DocumentStore';
 
+export class ConflictResolutionError extends Error {
+  public readonly code: string;
+  public readonly statusCode: number;
+
+  constructor(message: string, code: string, statusCode = 409) {
+    super(message);
+    this.name = 'ConflictResolutionError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
 export interface ServerConflictDecision {
   conflict: ConflictRecord;
   autoResolved: boolean;
@@ -30,7 +42,7 @@ export type ServerDomainConflictHandler = (params: {
  * Supports:
  * - SERVER_AUTHORITATIVE (e.g. inventory, product prices)
  * - LAST_WRITE_WINS_DETERMINISTIC (version + timestamp + deviceId tie-breaking)
- * - MANUAL_RESOLUTION (recorded in Conflict Center for human/operator review)
+ * - MANUAL_RESOLUTION (recorded in Conflict Center with optimistic concurrency + idempotency guards)
  * - DOMAIN_CUSTOM (pluggable domain-specific resolvers such as cart delta merging)
  */
 export class ConflictManager {
@@ -107,6 +119,7 @@ export class ConflictManager {
     if (policy === 'SERVER_AUTHORITATIVE') {
       baseRecord.resolutionStatus = 'RESOLVED_AUTO';
       baseRecord.resolvedAt = now;
+      baseRecord.resolutionChoice = 'KEEP_SERVER';
       baseRecord.resolvedPayload = params.remoteState;
       baseRecord.resolutionSummary =
         params.summary ?? 'Authoritative server version retained.';
@@ -126,8 +139,6 @@ export class ConflictManager {
     }
 
     if (policy === 'LAST_WRITE_WINS_DETERMINISTIC') {
-      // Deterministic tie-breaker: compare server updatedAt against operation createdAt,
-      // then break equal timestamps lexicographically by deviceId vs 'server'.
       const serverUpdatedAt =
         typeof params.remoteState?.updatedAt === 'string'
           ? params.remoteState.updatedAt
@@ -140,6 +151,7 @@ export class ConflictManager {
       const winning = clientWins ? params.operation.payload : params.remoteState;
       baseRecord.resolutionStatus = 'RESOLVED_AUTO';
       baseRecord.resolvedAt = now;
+      baseRecord.resolutionChoice = clientWins ? 'APPLY_CLIENT' : 'KEEP_SERVER';
       baseRecord.resolvedPayload = winning;
       baseRecord.resolutionSummary = clientWins
         ? 'Deterministic LWW applied client payload.'
@@ -188,17 +200,88 @@ export class ConflictManager {
       }
     }
 
-    // MANUAL_RESOLUTION (or domain handler escalated to manual)
     this.conflictsCol.insertOne(baseRecord as ConflictRecord & Record<string, unknown>);
     return { conflict: baseRecord, autoResolved: false, winningPayload: null };
   }
 
+  /**
+   * Resolves an OPEN conflict manually with:
+   * - Single-resolution enforcement (prevents inconsistent double-resolution)
+   * - Idempotent replay when identical idempotencyKey or choice+payload is re-submitted
+   * - Optimistic concurrency check (`currentServerVersion`) so newer server state
+   *   is never blindly overwritten.
+   */
   resolveManually(
     conflictId: string,
-    req: ResolveConflictRequest
-  ): ConflictRecord | null {
+    req: ResolveConflictRequest,
+    currentServerVersion?: number | null
+  ): { conflict: ConflictRecord; idempotentReplay: boolean } {
     const existing = this.conflictsCol.findById(conflictId);
-    if (!existing) return null;
+    if (!existing) {
+      throw new ConflictResolutionError(
+        `Conflict "${conflictId}" not found`,
+        'CONFLICT_NOT_FOUND',
+        404
+      );
+    }
+
+    // 1. Check already-resolved conflicts for idempotency vs inconsistent re-resolution
+    if (existing.resolutionStatus !== 'OPEN') {
+      const sameIdempotencyKey =
+        Boolean(req.idempotencyKey) &&
+        existing.resolutionIdempotencyKey === req.idempotencyKey;
+
+      const requestedPayload =
+        req.resolutionChoice === 'KEEP_SERVER'
+          ? existing.remoteState
+          : req.resolutionChoice === 'APPLY_CLIENT'
+          ? existing.localPayload
+          : req.resolvedPayload ?? null;
+
+      const sameDecision =
+        existing.resolutionChoice === req.resolutionChoice &&
+        JSON.stringify(existing.resolvedPayload ?? null) === JSON.stringify(requestedPayload);
+
+      if (sameIdempotencyKey || sameDecision) {
+        return { conflict: existing, idempotentReplay: true };
+      }
+
+      throw new ConflictResolutionError(
+        `Conflict "${conflictId}" is already ${existing.resolutionStatus} (choice: ${existing.resolutionChoice ?? 'AUTO'}) and cannot be resolved inconsistently`,
+        'CONFLICT_ALREADY_RESOLVED',
+        409
+      );
+    }
+
+    // 2. Validate CUSTOM payload requirement
+    if (req.resolutionChoice === 'CUSTOM') {
+      if (
+        !req.resolvedPayload ||
+        typeof req.resolvedPayload !== 'object' ||
+        Array.isArray(req.resolvedPayload)
+      ) {
+        throw new ConflictResolutionError(
+          'CUSTOM resolution requires a valid resolvedPayload object',
+          'INVALID_CUSTOM_PAYLOAD',
+          400
+        );
+      }
+    }
+
+    // 3. Optimistic concurrency check: refuse to blindly overwrite newer server state
+    if (
+      req.resolutionChoice !== 'KEEP_SERVER' &&
+      typeof currentServerVersion === 'number' &&
+      currentServerVersion > existing.remoteVersion
+    ) {
+      if (req.expectedServerVersion !== currentServerVersion) {
+        throw new ConflictResolutionError(
+          `Server entity "${existing.entityType}:${existing.entityId}" advanced from v${existing.remoteVersion} to v${currentServerVersion} since this conflict was detected. Reload latest server state and pass expectedServerVersion=${currentServerVersion} to confirm.`,
+          'STALE_CONFLICT_RESOLUTION',
+          409
+        );
+      }
+    }
 
     const now = new Date().toISOString();
     let resolvedPayload: Record<string, unknown> | null = existing.remoteState;
@@ -211,8 +294,10 @@ export class ConflictManager {
     const updated: ConflictRecord = {
       ...existing,
       resolutionStatus: 'RESOLVED_MANUAL',
+      resolutionChoice: req.resolutionChoice,
       resolvedAt: now,
       resolvedPayload,
+      resolutionIdempotencyKey: req.idempotencyKey,
       resolutionSummary:
         req.note || `Manually resolved with strategy ${req.resolutionChoice}.`,
       history: [
@@ -228,7 +313,7 @@ export class ConflictManager {
     };
 
     this.conflictsCol.upsertOne(updated as ConflictRecord & Record<string, unknown>);
-    return updated;
+    return { conflict: updated, idempotentReplay: false };
   }
 
   getById(conflictId: string): ConflictRecord | null {

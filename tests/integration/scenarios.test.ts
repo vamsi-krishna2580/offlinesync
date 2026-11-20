@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createBackendApp, type OfflineSyncBackendContext } from '../../backend/api/createApp';
+import { DEFAULT_LOCAL_MONITOR_TOKEN } from '../../backend/api/validation';
 import { OFFLINESHOP_APP_ID } from '../../backend/shop-adapter/ShopBusinessAdapter';
 import type { OrderDocument, Product } from '../../backend/shop-adapter/types';
 import {
@@ -251,14 +252,18 @@ describe('OfflineSync End-to-End Integration Scenarios (A through G)', () => {
     const target = openConflicts.find((c) => c.entityId === sharedCart);
     expect(target).toBeDefined();
 
-    // Resolve manually via HTTP endpoint
+    // Resolve manually via HTTP endpoint (requires Monitor authorization token)
     const resolveResp = await fetch(
       `${baseUrl}/api/sync/conflicts/${target!.conflictId}/resolve`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Monitor-Token': DEFAULT_LOCAL_MONITOR_TOKEN,
+        },
         body: JSON.stringify({
           resolutionChoice: 'KEEP_SERVER',
+          expectedServerVersion: target!.remoteVersion,
           actor: 'integration-test',
           note: 'Preserve Device A quantity',
         }),

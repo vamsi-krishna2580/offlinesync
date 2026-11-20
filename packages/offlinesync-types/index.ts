@@ -53,6 +53,12 @@ export type SyncEventType =
 
 export type SessionResult = 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'INTERRUPTED';
 
+export interface ApiErrorResponse {
+  error: string;
+  code: string;
+  details?: string[];
+}
+
 export interface SyncOperation<TPayload = Record<string, unknown>> {
   operationId: string;
   deviceId: string;
@@ -110,8 +116,10 @@ export interface ConflictRecord {
   conflictType: ConflictType;
   resolutionStatus: ConflictResolutionStatus;
   resolutionPolicy: ConflictResolutionPolicy;
+  resolutionChoice?: 'KEEP_SERVER' | 'APPLY_CLIENT' | 'CUSTOM';
   resolvedPayload?: Record<string, unknown> | null;
   resolutionSummary?: string;
+  resolutionIdempotencyKey?: string;
   detectedAt: string;
   resolvedAt: string | null;
   history: ConflictHistoryEntry[];
@@ -181,6 +189,11 @@ export interface RegisterDeviceRequest {
 
 export interface RegisterDeviceResponse {
   device: DeviceRecord;
+  /**
+   * Bearer/device token issued on initial registration (or verified on re-registration).
+   * Clients must persist this token locally and send it in `X-Device-Token` on sync calls.
+   */
+  deviceToken?: string;
   serverTimestamp: string;
   currentCursor: number;
 }
@@ -217,6 +230,7 @@ export interface SyncPullResponse {
   sessionId: string | null;
   changes: RemoteChange[];
   updatedCursor: number;
+  latestAppCursor: number;
   hasMore: boolean;
   serverTimestamp: string;
 }
@@ -228,6 +242,7 @@ export interface SyncProcessRequest {
   lastCursor: number;
   operations: SyncOperation[];
   entityTypes?: string[];
+  limit?: number;
   pendingRemaining?: number;
 }
 
@@ -240,6 +255,7 @@ export interface SyncProcessResponse {
   conflicts: ConflictRecord[];
   remoteChanges: RemoteChange[];
   updatedCursor: number;
+  latestAppCursor: number;
   hasMore: boolean;
   serverTimestamp: string;
   durationMs: number;
@@ -248,8 +264,15 @@ export interface SyncProcessResponse {
 export interface ResolveConflictRequest {
   resolutionChoice: 'KEEP_SERVER' | 'APPLY_CLIENT' | 'CUSTOM';
   resolvedPayload?: Record<string, unknown>;
+  expectedServerVersion?: number;
+  idempotencyKey?: string;
   actor?: string;
   note?: string;
+}
+
+export interface ResolveConflictResponse {
+  conflict: ConflictRecord;
+  idempotentReplay: boolean;
 }
 
 export interface MonitorMetrics {

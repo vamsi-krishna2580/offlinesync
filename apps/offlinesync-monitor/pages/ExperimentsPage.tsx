@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { ExperimentRunRecord } from '../../../packages/offlinesync-types';
-import { monitorApi } from '../api/monitorApi';
+import { getExperimentsExportCsvUrl, monitorApi } from '../api/monitorApi';
 
 const SCENARIOS: Array<{ value: ExperimentRunRecord['scenario']; label: string }> = [
   { value: 'STABLE_CONNECTION', label: 'Stable Connection' },
@@ -98,7 +98,7 @@ export const ExperimentsPage: React.FC = () => {
         </div>
 
         <a
-          href="/api/monitor/experiments/export.csv"
+          href={getExperimentsExportCsvUrl()}
           download="offlinesync-experiments.csv"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-800 hover:bg-slate-50 whitespace-nowrap shrink-0"
         >

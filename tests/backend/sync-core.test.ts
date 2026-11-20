@@ -70,10 +70,16 @@ describe('OfflineSync Backend Core & Shop Adapter (Unit Tests)', () => {
 
   it('prevents duplicate processing via unique operationId and clientOrderId idempotency', () => {
     const { core, shopAdapter } = createBackendApp({ persistPath: null });
+    core.registerDevice({
+      deviceId: 'dev-unit-1',
+      deviceName: 'Unit Device 1',
+      appId: OFFLINESHOP_APP_ID,
+    });
     const initialStock = shopAdapter.productsCol.findById('P101')!.stock;
 
     const orderOp = makeOp({
       operationId: 'op-order-idempotent-1',
+      deviceId: 'dev-unit-1',
       entityType: 'order',
       entityId: 'CLI-IDEM-001',
       operationType: 'ORDER_CREATE',
@@ -120,6 +126,9 @@ describe('OfflineSync Backend Core & Shop Adapter (Unit Tests)', () => {
 
   it('enforces server-authoritative inventory and detects/resolves concurrent cart conflicts', () => {
     const { core, shopAdapter } = createBackendApp({ persistPath: null });
+    core.registerDevice({ deviceId: 'dev-rogue', deviceName: 'Rogue', appId: OFFLINESHOP_APP_ID });
+    core.registerDevice({ deviceId: 'dev-A', deviceName: 'Device A', appId: OFFLINESHOP_APP_ID });
+    core.registerDevice({ deviceId: 'dev-B', deviceName: 'Device B', appId: OFFLINESHOP_APP_ID });
 
     // 1. Client attempts to overwrite authoritative product stock -> rejected with SERVER_AUTHORITATIVE
     const stockTamper = core.push({
@@ -129,6 +138,7 @@ describe('OfflineSync Backend Core & Shop Adapter (Unit Tests)', () => {
       lastCursor: 0,
       operations: [
         makeOp({
+          deviceId: 'dev-rogue',
           entityType: 'product',
           entityId: 'P101',
           operationType: 'PRODUCT_UPDATE',
@@ -182,12 +192,17 @@ describe('OfflineSync Backend Core & Shop Adapter (Unit Tests)', () => {
       actor: 'qa-engineer',
       note: 'Retain device A baseline quantity',
     });
-    expect(resolved?.resolutionStatus).toBe('RESOLVED_MANUAL');
-    expect(resolved?.history.length).toBeGreaterThanOrEqual(2);
+    expect(resolved?.conflict.resolutionStatus).toBe('RESOLVED_MANUAL');
+    expect(resolved?.conflict.history.length).toBeGreaterThanOrEqual(2);
   });
 
   it('flags offline orders with REQUIRES_ACTION when server price or stock changes', () => {
     const { core, shopAdapter } = createBackendApp({ persistPath: null });
+    core.registerDevice({
+      deviceId: 'dev-offline-buyer',
+      deviceName: 'Offline Buyer',
+      appId: OFFLINESHOP_APP_ID,
+    });
 
     // Server increases price of P103 from $94 to $120 while client was offline
     shopAdapter.updateProductAuthoritative('P103', { price: 120 });
@@ -199,6 +214,7 @@ describe('OfflineSync Backend Core & Shop Adapter (Unit Tests)', () => {
       lastCursor: 0,
       operations: [
         makeOp({
+          deviceId: 'dev-offline-buyer',
           entityType: 'order',
           entityId: 'CLI-DRIFT-1',
           operationType: 'ORDER_CREATE',

@@ -3,13 +3,13 @@ import type {
   ConflictRecord,
   ConflictResolutionPolicy,
   ConflictType,
-  DeviceRecord,
   ExperimentRunRecord,
   MonitorMetrics,
   OperationOutcome,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   ResolveConflictRequest,
+  ResolveConflictResponse,
   SyncEventRecord,
   SyncMetadataRecord,
   SyncOperation,
@@ -22,8 +22,12 @@ import type {
   SyncSessionRecord,
 } from '../../packages/offlinesync-types';
 import type { DocumentCollection, DocumentStore } from '../persistence/DocumentStore';
-import { ConflictManager, type ServerDomainConflictHandler } from './ConflictManager';
-import { DeviceRegistry } from './DeviceRegistry';
+import {
+  ConflictManager,
+  ConflictResolutionError,
+  type ServerDomainConflictHandler,
+} from './ConflictManager';
+import { DeviceAuthError, DeviceRegistry, type StoredDeviceRecord } from './DeviceRegistry';
 import { IdempotencyService, type StoredProcessedOperation } from './IdempotencyService';
 import { ReconciliationEngine, type ChangeLogDocument } from './ReconciliationEngine';
 import { TelemetryService } from './TelemetryService';
@@ -61,21 +65,26 @@ export interface AdapterOperationContext {
 export interface BusinessAdapter {
   appId: string;
   supportedEntityTypes: string[];
+  supportedOperationTypes?: Record<string, string[]>;
   registerPolicies?: (conflicts: ConflictManager) => void;
+  getCurrentEntityVersion?(entityType: string, entityId: string): number | null;
   processOperation(
     operation: SyncOperation,
     ctx: AdapterOperationContext
   ): OperationOutcome;
   applyManualConflictResolution?(
     conflict: ConflictRecord,
+    resolutionChoice: ResolveConflictRequest['resolutionChoice'],
     resolvedPayload: Record<string, unknown> | null,
     ctx: AdapterOperationContext
-  ): void;
+  ): { operationFinalStatus: SyncOperation['status']; note?: string };
 }
 
 /**
  * Generic, reusable OfflineSync Backend Core.
  * Contains ZERO e-commerce business logic.
+ * Coordinates transactional operation processing, idempotency, app-scoped cursors,
+ * device authentication, and policy-based conflict resolution.
  */
 export class SyncCoreEngine {
   public readonly store: DocumentStore;
@@ -92,10 +101,7 @@ export class SyncCoreEngine {
   constructor(store: DocumentStore) {
     this.store = store;
 
-    const devicesCol = store.registerCollection<DeviceRecord & Record<string, unknown>>(
-      'devices',
-      'deviceId'
-    );
+    const devicesCol = store.registerCollection<StoredDeviceRecord>('devices', 'deviceId');
     const opsCol = store.registerCollection<StoredProcessedOperation>(
       'sync_operations',
       'operationId',
@@ -120,7 +126,13 @@ export class SyncCoreEngine {
     );
     const changeLogCol = store.registerCollection<ChangeLogDocument>(
       'sync_changelog',
-      'changeId'
+      'changeId',
+      [
+        {
+          name: 'uniq_app_cursor',
+          keyFn: (doc) => `${doc.appId}:${doc.cursor}`,
+        },
+      ]
     );
     const metaCol = store.registerCollection<SyncMetadataRecord & Record<string, unknown>>(
       'sync_metadata',
@@ -133,7 +145,7 @@ export class SyncCoreEngine {
     this.devices = new DeviceRegistry(devicesCol);
     this.idempotency = new IdempotencyService(opsCol);
     this.conflicts = new ConflictManager(conflictsCol);
-    this.reconciliation = new ReconciliationEngine(changeLogCol, metaCol);
+    this.reconciliation = new ReconciliationEngine(store, changeLogCol, metaCol);
     this.telemetry = new TelemetryService(eventsCol);
     this.sessionsCol = sessionsCol;
     this.experimentsCol = experimentsCol;
@@ -146,6 +158,14 @@ export class SyncCoreEngine {
     }
   }
 
+  getAdapter(appId: string): BusinessAdapter | undefined {
+    return this.adapters.get(appId);
+  }
+
+  hasRegisteredApp(appId: string): boolean {
+    return this.adapters.has(appId);
+  }
+
   registerConflictPolicy(
     entityType: string,
     policy: ConflictResolutionPolicy,
@@ -154,8 +174,22 @@ export class SyncCoreEngine {
     this.conflicts.registerPolicy(entityType, policy, handler);
   }
 
-  registerDevice(req: RegisterDeviceRequest): RegisterDeviceResponse {
-    const { device, isNew } = this.devices.register(req);
+  registerDevice(
+    req: RegisterDeviceRequest,
+    presentedToken?: string
+  ): RegisterDeviceResponse {
+    if (!this.adapters.has(req.appId)) {
+      throw new DeviceAuthError(
+        `Unknown or unregistered application "${req.appId}"`,
+        'UNKNOWN_APP_ID',
+        400
+      );
+    }
+
+    const { device, deviceToken, isNew } = this.store.runTransaction(() =>
+      this.devices.register(req, presentedToken)
+    );
+
     this.telemetry.emit({
       deviceId: device.deviceId,
       appId: device.appId,
@@ -169,8 +203,9 @@ export class SyncCoreEngine {
     });
     return {
       device,
+      deviceToken,
       serverTimestamp: new Date().toISOString(),
-      currentCursor: this.reconciliation.getCurrentCursor(),
+      currentCursor: this.reconciliation.getCurrentCursor(req.appId),
     };
   }
 
@@ -178,6 +213,9 @@ export class SyncCoreEngine {
     const started = performance.now();
     const sessionId = req.sessionId || `sess-${crypto.randomUUID()}`;
     const cursorBefore = req.lastCursor ?? 0;
+
+    this.assertRegisteredDeviceAndApp(req.deviceId, req.appId);
+    this.assertOperationOwnership(req.deviceId, req.appId, req.operations);
 
     this.telemetry.emit({
       deviceId: req.deviceId,
@@ -189,7 +227,7 @@ export class SyncCoreEngine {
     });
 
     const result = this.executeOperationBatch(req.deviceId, req.appId, sessionId, req.operations);
-    const updatedCursor = this.reconciliation.getCurrentCursor();
+    const updatedCursor = this.reconciliation.getCurrentCursor(req.appId);
     const durationMs = Math.round((performance.now() - started) * 100) / 100;
 
     this.recordSession({
@@ -207,11 +245,12 @@ export class SyncCoreEngine {
       bytesSent: rawBytesSent,
       bytesReceived: 0,
       errors: result.errors,
-      result: result.rejectedIds.length > 0 && result.acknowledgedIds.length === 0
-        ? 'FAILED'
-        : result.rejectedIds.length > 0
-        ? 'PARTIAL'
-        : 'SUCCESS',
+      result:
+        result.rejectedIds.length > 0 && result.acknowledgedIds.length === 0
+          ? 'FAILED'
+          : result.rejectedIds.length > 0
+          ? 'PARTIAL'
+          : 'SUCCESS',
       cursorBefore,
       cursorAfter: updatedCursor,
     });
@@ -231,6 +270,8 @@ export class SyncCoreEngine {
   }
 
   pull(req: SyncPullRequest): SyncPullResponse {
+    this.assertRegisteredDeviceAndApp(req.deviceId, req.appId);
+
     const pulled = this.reconciliation.pullChanges({
       appId: req.appId,
       sinceCursor: req.lastCursor ?? 0,
@@ -242,6 +283,7 @@ export class SyncCoreEngine {
       sessionId: req.sessionId ?? null,
       changes: pulled.changes,
       updatedCursor: pulled.updatedCursor,
+      latestAppCursor: pulled.latestAppCursor,
       hasMore: pulled.hasMore,
       serverTimestamp: new Date().toISOString(),
     };
@@ -256,6 +298,9 @@ export class SyncCoreEngine {
     const t0 = performance.now();
     const sessionId = req.sessionId || `sess-${crypto.randomUUID()}`;
     const cursorBefore = req.lastCursor ?? 0;
+
+    this.assertRegisteredDeviceAndApp(req.deviceId, req.appId);
+    this.assertOperationOwnership(req.deviceId, req.appId, req.operations);
 
     this.telemetry.emit({
       deviceId: req.deviceId,
@@ -294,7 +339,7 @@ export class SyncCoreEngine {
       appId: req.appId,
       sinceCursor: cursorBefore,
       entityTypes: req.entityTypes,
-      limit: 150,
+      limit: req.limit ?? 150,
     });
 
     const durationMs = Math.round((performance.now() - t0) * 100) / 100;
@@ -309,6 +354,7 @@ export class SyncCoreEngine {
       conflicts: batchRes.conflicts,
       remoteChanges: pulled.changes,
       updatedCursor: pulled.updatedCursor,
+      latestAppCursor: pulled.latestAppCursor,
       hasMore: pulled.hasMore,
       serverTimestamp: endedAt,
       durationMs,
@@ -317,11 +363,7 @@ export class SyncCoreEngine {
     const bytesReceived = Buffer.byteLength(JSON.stringify(responseObj), 'utf-8');
 
     const sessionResult =
-      batchRes.rejectedIds.length > 0 && batchRes.acknowledgedIds.length === 0
-        ? 'PARTIAL'
-        : batchRes.rejectedIds.length > 0
-        ? 'PARTIAL'
-        : 'SUCCESS';
+      batchRes.rejectedIds.length > 0 ? 'PARTIAL' : 'SUCCESS';
 
     this.recordSession({
       sessionId,
@@ -371,43 +413,76 @@ export class SyncCoreEngine {
     return responseObj;
   }
 
+  /**
+   * Transactionally resolves an OPEN conflict with optimistic concurrency protection,
+   * adapter validation, change-log publication, and consistent operation status update.
+   */
   resolveConflict(
     conflictId: string,
     req: ResolveConflictRequest
-  ): ConflictRecord | null {
-    const resolved = this.conflicts.resolveManually(conflictId, req);
-    if (!resolved) return null;
-
-    const adapter = this.adapters.get(resolved.appId);
-    if (adapter?.applyManualConflictResolution) {
-      adapter.applyManualConflictResolution(
-        resolved,
-        resolved.resolvedPayload ?? null,
-        this.buildAdapterContext()
+  ): ResolveConflictResponse {
+    const existing = this.conflicts.getById(conflictId);
+    if (!existing) {
+      throw new ConflictResolutionError(
+        `Conflict "${conflictId}" not found`,
+        'CONFLICT_NOT_FOUND',
+        404
       );
     }
 
-    this.idempotency.updateOperationStatus(
-      resolved.operationId,
-      'ACKNOWLEDGED',
-      `Resolved via conflict ${conflictId} (${req.resolutionChoice})`
-    );
+    const adapter = this.adapters.get(existing.appId);
+    const currentServerVersion = adapter?.getCurrentEntityVersion
+      ? adapter.getCurrentEntityVersion(existing.entityType, existing.entityId)
+      : null;
 
-    this.telemetry.emit({
-      deviceId: resolved.deviceId,
-      appId: resolved.appId,
-      eventType: 'CONFLICT_RESOLVED',
-      severity: 'INFO',
-      metadata: {
-        conflictId: resolved.conflictId,
-        entityType: resolved.entityType,
-        entityId: resolved.entityId,
-        resolutionChoice: req.resolutionChoice,
-        actor: req.actor || 'monitor-operator',
-      },
+    const outcome = this.store.runTransaction(() => {
+      const { conflict: resolved, idempotentReplay } = this.conflicts.resolveManually(
+        conflictId,
+        req,
+        currentServerVersion
+      );
+
+      if (idempotentReplay) {
+        return { conflict: resolved, idempotentReplay: true };
+      }
+
+      let finalOpStatus: SyncOperation['status'] =
+        req.resolutionChoice === 'KEEP_SERVER' ? 'FAILED' : 'ACKNOWLEDGED';
+      let opNote = `Resolved via conflict ${conflictId} (${req.resolutionChoice})`;
+
+      if (adapter?.applyManualConflictResolution) {
+        const applied = adapter.applyManualConflictResolution(
+          resolved,
+          req.resolutionChoice,
+          resolved.resolvedPayload ?? null,
+          this.buildAdapterContext()
+        );
+        finalOpStatus = applied.operationFinalStatus;
+        if (applied.note) opNote = applied.note;
+      }
+
+      this.idempotency.updateOperationStatus(resolved.operationId, finalOpStatus, opNote);
+
+      return { conflict: resolved, idempotentReplay: false };
     });
 
-    return resolved;
+    if (!outcome.idempotentReplay) {
+      this.telemetry.emit({
+        deviceId: outcome.conflict.deviceId,
+        appId: outcome.conflict.appId,
+        eventType: 'CONFLICT_RESOLVED',
+        severity: 'INFO',
+        metadata: {
+          conflictId: outcome.conflict.conflictId,
+          entityType: outcome.conflict.entityType,
+          entityId: outcome.conflict.entityId,
+          resolutionChoice: req.resolutionChoice,
+          actor: req.actor || 'monitor-operator',
+        },
+      });
+    }
+
+    return outcome;
   }
 
   listSessions(filter?: { deviceId?: string; limit?: number }): SyncSessionRecord[] {
@@ -499,6 +574,54 @@ export class SyncCoreEngine {
       totalBytesTransferred,
       currentServerCursor: this.reconciliation.getCurrentCursor(),
     };
+  }
+
+  private assertRegisteredDeviceAndApp(deviceId: string, appId: string): void {
+    if (!this.adapters.has(appId)) {
+      throw new DeviceAuthError(
+        `Unknown or unregistered application "${appId}"`,
+        'UNKNOWN_APP_ID',
+        400
+      );
+    }
+    const dev = this.devices.getById(deviceId);
+    if (!dev) {
+      throw new DeviceAuthError(
+        `Device "${deviceId}" must be registered before synchronizing`,
+        'UNREGISTERED_DEVICE',
+        401
+      );
+    }
+    if (dev.appId !== appId) {
+      throw new DeviceAuthError(
+        `Device "${deviceId}" is bound to appId "${dev.appId}", not "${appId}"`,
+        'APP_OWNERSHIP_MISMATCH',
+        403
+      );
+    }
+  }
+
+  private assertOperationOwnership(
+    deviceId: string,
+    appId: string,
+    operations: SyncOperation[]
+  ): void {
+    for (const op of operations) {
+      if (op.deviceId !== deviceId) {
+        throw new DeviceAuthError(
+          `Operation "${op.operationId}" claims deviceId "${op.deviceId}" which does not match authenticated device "${deviceId}"`,
+          'OPERATION_OWNERSHIP_VIOLATION',
+          403
+        );
+      }
+      if (op.appId !== appId) {
+        throw new DeviceAuthError(
+          `Operation "${op.operationId}" claims appId "${op.appId}" which does not match request appId "${appId}"`,
+          'OPERATION_APP_MISMATCH',
+          403
+        );
+      }
+    }
   }
 
   private buildAdapterContext(): AdapterOperationContext {
@@ -608,7 +731,7 @@ export class SyncCoreEngine {
         continue;
       }
 
-      // 3. Dispatch to registered business adapter
+      // 3. Dispatch to registered business adapter inside an atomic multi-collection transaction
       if (!adapter) {
         const reason = `No business adapter registered for appId "${appId}"`;
         rejectedIds.push(op.operationId);
@@ -623,8 +746,42 @@ export class SyncCoreEngine {
         continue;
       }
 
-      const outcome = adapter.processOperation(op, adapterCtx);
-      this.idempotency.recordProcessed(op, outcome);
+      let outcome: OperationOutcome;
+      try {
+        outcome = this.store.runTransaction(() => {
+          const adapterOutcome = adapter.processOperation(op, adapterCtx);
+          this.idempotency.recordProcessed(op, adapterOutcome);
+          return adapterOutcome;
+        });
+      } catch (err) {
+        // Transaction rolled back ALL entity mutations & idempotency entries cleanly.
+        const reason =
+          err instanceof Error
+            ? `Atomic processing failed and rolled back: ${err.message}`
+            : 'Atomic processing failed and rolled back';
+        rejectedIds.push(op.operationId);
+        errors.push(reason);
+        outcomes.push({
+          operationId: op.operationId,
+          status: 'REJECTED',
+          reason,
+        });
+        this.telemetry.emit({
+          deviceId,
+          appId,
+          sessionId,
+          eventType: 'OPERATION_REJECTED',
+          severity: 'ERROR',
+          metadata: {
+            operationId: op.operationId,
+            operationType: op.operationType,
+            rolledBack: true,
+            reason,
+          },
+        });
+        continue;
+      }
+
       outcomes.push(outcome);
 
       if (outcome.conflict) {
@@ -645,6 +802,21 @@ export class SyncCoreEngine {
             entityType: op.entityType,
             entityId: op.entityId,
             serverVersion: outcome.serverVersion,
+          },
+        });
+      } else if (outcome.status === 'DUPLICATE') {
+        duplicateIds.push(op.operationId);
+        this.telemetry.emit({
+          deviceId,
+          appId,
+          sessionId,
+          eventType: 'DUPLICATE_DETECTED',
+          severity: 'WARN',
+          metadata: {
+            operationId: op.operationId,
+            operationType: op.operationType,
+            entityId: op.entityId,
+            reason: outcome.reason,
           },
         });
       } else {

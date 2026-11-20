@@ -17,6 +17,8 @@ export interface TransportResult<T> {
 }
 
 export interface SyncTransport {
+  setDeviceToken?(token: string | null): void;
+  getDeviceToken?(): string | null;
   registerDevice(req: RegisterDeviceRequest): Promise<TransportResult<RegisterDeviceResponse>>;
   push(req: SyncPushRequest): Promise<TransportResult<SyncPushResponse>>;
   pull(req: SyncPullRequest): Promise<TransportResult<SyncPullResponse>>;
@@ -27,9 +29,10 @@ export interface HttpSyncTransportOptions {
   baseUrl?: string;
   timeoutMs?: number;
   fetchFn?: typeof fetch;
+  deviceToken?: string | null;
   /**
    * Optional fault injection hook for reproducible interruption experiments and tests.
-   * Return an Error to simulate mid-flight connection drops.
+   * Throw an Error to simulate mid-flight connection drops.
    */
   beforeRequest?: (endpoint: string, body: unknown) => Promise<void> | void;
 }
@@ -45,13 +48,23 @@ export class HttpSyncTransport implements SyncTransport {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
+  private deviceToken: string | null;
   public beforeRequest?: (endpoint: string, body: unknown) => Promise<void> | void;
 
   constructor(options?: HttpSyncTransportOptions) {
     this.baseUrl = (options?.baseUrl ?? '').replace(/\/$/, '');
     this.timeoutMs = options?.timeoutMs ?? 12000;
     this.fetchFn = options?.fetchFn ?? globalThis.fetch.bind(globalThis);
+    this.deviceToken = options?.deviceToken ?? null;
     this.beforeRequest = options?.beforeRequest;
+  }
+
+  setDeviceToken(token: string | null): void {
+    this.deviceToken = token;
+  }
+
+  getDeviceToken(): string | null {
+    return this.deviceToken;
   }
 
   private async postJson<TReq, TRes>(
@@ -69,12 +82,17 @@ export class HttpSyncTransport implements SyncTransport {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.deviceToken) {
+      headers['X-Device-Token'] = this.deviceToken;
+    }
+
     try {
       const response = await this.fetchFn(`${this.baseUrl}${endpoint}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: bodyText,
         signal: controller.signal,
       });
@@ -85,13 +103,24 @@ export class HttpSyncTransport implements SyncTransport {
 
       if (!response.ok) {
         let message = `HTTP ${response.status}`;
+        let code = '';
         try {
-          const parsed = JSON.parse(responseText) as { error?: string; detail?: string };
+          const parsed = JSON.parse(responseText) as {
+            error?: string;
+            detail?: string;
+            code?: string;
+          };
           message = parsed.error ?? parsed.detail ?? message;
+          code = parsed.code ?? '';
         } catch {
           // keep default
         }
-        throw new Error(`Sync transport error on ${endpoint}: ${message}`);
+        const err = new Error(
+          `Sync transport error on ${endpoint}: ${code ? `[${code}] ` : ''}${message}`
+        ) as Error & { statusCode?: number; code?: string };
+        err.statusCode = response.status;
+        err.code = code || undefined;
+        throw err;
       }
 
       const data = JSON.parse(responseText) as TRes;

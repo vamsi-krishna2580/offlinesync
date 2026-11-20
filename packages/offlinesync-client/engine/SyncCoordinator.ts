@@ -174,6 +174,11 @@ export class OfflineSyncEngine {
     this.lastSyncAt = (await this.storage.getMeta<string | null>('lastSyncAt')) ?? null;
     this.registered = Boolean(await this.storage.getMeta<boolean>('deviceRegistered'));
 
+    const storedToken = await this.storage.getMeta<string>('deviceToken');
+    if (storedToken) {
+      this.transport.setDeviceToken?.(storedToken);
+    }
+
     // Recover any operations left in PROCESSING from a prior tab close or crash
     const recovered = await this.queue.recoverInterruptedOperations();
     if (recovered.length > 0) {
@@ -393,6 +398,12 @@ export class OfflineSyncEngine {
     return { operation: op, localWriteMs };
   }
 
+  private getCursorMetaKey(entityTypes?: string[]): string {
+    if (!entityTypes || entityTypes.length === 0) return 'lastCursor';
+    const normalized = [...new Set(entityTypes)].sort().join(',');
+    return `lastCursor:filter:${normalized}`;
+  }
+
   async ensureDeviceRegistered(): Promise<boolean> {
     if (!this.network.isOnline()) return false;
     try {
@@ -402,6 +413,10 @@ export class OfflineSyncEngine {
         appId: this.appId,
         platform: this.platform,
       });
+      if (res.data.deviceToken) {
+        await this.storage.setMeta('deviceToken', res.data.deviceToken);
+        this.transport.setDeviceToken?.(res.data.deviceToken);
+      }
       this.registered = true;
       await this.storage.setMeta('deviceRegistered', true);
       this.network.reportRequestSuccess();
@@ -420,41 +435,76 @@ export class OfflineSyncEngine {
 
   /**
    * Pull remote changes incrementally from the last stored cursor without pushing operations.
+   *
+   * Cursor safety guarantees:
+   * - Entity-type-filtered pulls track an isolated cursor key so they never advance the
+   *   unfiltered cursor past unseen entity types.
+   * - Cursor is persisted per page ONLY AFTER every change in that page has been
+   *   successfully applied locally. If an error occurs mid-page or on page N+1, the cursor
+   *   stays at the last fully applied page so nothing is skipped.
    */
-  async pullRemoteChanges(entityTypes?: string[]): Promise<{
+  async pullRemoteChanges(
+    entityTypes?: string[],
+    options?: { limit?: number }
+  ): Promise<{
     changes: RemoteChange[];
     updatedCursor: number;
     bytesTransferred: number;
   }> {
     if (!this.initialized) await this.initialize();
+    const isFiltered = Boolean(entityTypes && entityTypes.length > 0);
+    const cursorMetaKey = this.getCursorMetaKey(entityTypes);
+    let cursor = isFiltered
+      ? ((await this.storage.getMeta<number>(cursorMetaKey)) ?? 0)
+      : this.lastCursor;
+
     if (!this.network.isOnline()) {
-      return { changes: [], updatedCursor: this.lastCursor, bytesTransferred: 0 };
+      return { changes: [], updatedCursor: cursor, bytesTransferred: 0 };
     }
 
-    let cursor = this.lastCursor;
+    if (!this.registered) {
+      await this.ensureDeviceRegistered();
+    }
+
     const allChanges: RemoteChange[] = [];
     let hasMore = true;
     let totalBytes = 0;
+    let pages = 0;
 
-    while (hasMore) {
+    while (hasMore && pages < 200) {
+      pages += 1;
+      const prevCursor = cursor;
       const res = await this.transport.pull({
         deviceId: this.deviceId,
         appId: this.appId,
         lastCursor: cursor,
         entityTypes,
+        limit: options?.limit,
       });
       totalBytes += res.bytesSent + res.bytesReceived;
+
+      // Apply every change in this page BEFORE advancing or persisting the cursor.
       for (const change of res.data.changes) {
         await this.applyRemoteChange(change);
         allChanges.push(change);
       }
-      cursor = res.data.updatedCursor;
+
+      if (res.data.updatedCursor > cursor) {
+        cursor = res.data.updatedCursor;
+        await this.storage.setMeta(cursorMetaKey, cursor);
+        if (!isFiltered) {
+          this.lastCursor = cursor;
+        }
+      }
+
       hasMore = res.data.hasMore;
+      // Guard against non-advancing pagination loops
+      if (hasMore && cursor <= prevCursor && res.data.changes.length === 0) {
+        break;
+      }
     }
 
-    this.lastCursor = cursor;
     this.lastSyncAt = new Date().toISOString();
-    await this.storage.setMeta('lastCursor', this.lastCursor);
     await this.storage.setMeta('lastSyncAt', this.lastSyncAt);
     this.network.reportRequestSuccess();
     await this.emitStatus();
@@ -465,15 +515,16 @@ export class OfflineSyncEngine {
   /**
    * Execute a full bidirectional synchronization cycle:
    * 1. Recover any stranded PROCESSING operations
-   * 2. Ensure device registration
+   * 2. Ensure device registration (persisting deviceToken)
    * 3. Push eligible batches of pending operations
    * 4. Reconcile acknowledgements, duplicates, rejections, and conflicts
-   * 5. Pull incremental remote changes since lastCursor
-   * 6. Persist updated cursor and notify subscribers
+   * 5. Pull incremental remote changes since active cursor
+   * 6. Persist updated cursor per page ONLY AFTER applying remote changes, and notify subscribers
    */
   async syncNow(options?: {
     entityTypes?: string[];
     ignoreBackoff?: boolean;
+    limit?: number;
   }): Promise<SyncRunSummary> {
     if (!this.initialized) await this.initialize();
 
@@ -518,8 +569,15 @@ export class OfflineSyncEngine {
     this.syncInProgress = true;
     this.syncState = 'SYNCING';
     this.lastError = null;
+
+    const isFiltered = Boolean(options?.entityTypes && options.entityTypes.length > 0);
+    const cursorMetaKey = this.getCursorMetaKey(options?.entityTypes);
+    let activeCursor = isFiltered
+      ? ((await this.storage.getMeta<number>(cursorMetaKey)) ?? 0)
+      : this.lastCursor;
+
     await this.recordEvent('SYNC_STARTED', 'INFO', sessionId, {
-      lastCursor: this.lastCursor,
+      lastCursor: activeCursor,
     });
     await this.emitStatus();
 
@@ -531,10 +589,14 @@ export class OfflineSyncEngine {
     let totalRemoteChanges = 0;
     let totalBytesSent = 0;
     let totalBytesReceived = 0;
+    let retriedRegistration = false;
 
     try {
       if (!this.registered) {
-        await this.ensureDeviceRegistered();
+        const regOk = await this.ensureDeviceRegistered();
+        if (!regOk) {
+          throw new Error(this.lastError ?? 'Device registration failed');
+        }
       }
 
       const checkNow = options?.ignoreBackoff ? Number.MAX_SAFE_INTEGER : Date.now();
@@ -555,15 +617,50 @@ export class OfflineSyncEngine {
           });
         }
 
-        const transportRes = await this.transport.process({
-          deviceId: this.deviceId,
-          appId: this.appId,
-          sessionId,
-          lastCursor: this.lastCursor,
-          operations: batch,
-          entityTypes: options?.entityTypes,
-          pendingRemaining: remainingAfterBatch,
-        });
+        let transportRes;
+        try {
+          transportRes = await this.transport.process({
+            deviceId: this.deviceId,
+            appId: this.appId,
+            sessionId,
+            lastCursor: activeCursor,
+            operations: batch,
+            entityTypes: options?.entityTypes,
+            limit: options?.limit,
+            pendingRemaining: remainingAfterBatch,
+          });
+        } catch (transportErr) {
+          const errWithCode = transportErr as Error & { statusCode?: number; code?: string };
+          // If the server database was reset while this client still cached deviceRegistered=true,
+          // re-register once transparently. Never bypass DEVICE_TOKEN_INVALID.
+          if (
+            errWithCode.statusCode === 401 &&
+            errWithCode.code === 'UNREGISTERED_DEVICE' &&
+            !retriedRegistration
+          ) {
+            retriedRegistration = true;
+            this.registered = false;
+            await this.storage.setMeta('deviceRegistered', false);
+            await this.storage.setMeta('deviceToken', null);
+            this.transport.setDeviceToken?.(null);
+            const reRegOk = await this.ensureDeviceRegistered();
+            if (!reRegOk) {
+              throw transportErr;
+            }
+            transportRes = await this.transport.process({
+              deviceId: this.deviceId,
+              appId: this.appId,
+              sessionId,
+              lastCursor: activeCursor,
+              operations: batch,
+              entityTypes: options?.entityTypes,
+              limit: options?.limit,
+              pendingRemaining: remainingAfterBatch,
+            });
+          } else {
+            throw transportErr;
+          }
+        }
 
         totalBytesSent += transportRes.bytesSent;
         totalBytesReceived += transportRes.bytesReceived;
@@ -634,19 +731,26 @@ export class OfflineSyncEngine {
           }
         }
 
-        // Reconcile incremental remote changes pulled from server
+        // Apply EVERY pulled remote change BEFORE advancing/persisting cursor.
+        // If applyRemoteChange throws, cursor remains unchanged so no remote change is skipped.
+        const prevCursor = activeCursor;
         for (const change of resData.remoteChanges) {
           await this.applyRemoteChange(change);
           totalRemoteChanges += 1;
         }
 
-        if (resData.updatedCursor > this.lastCursor) {
-          this.lastCursor = resData.updatedCursor;
-          await this.storage.setMeta('lastCursor', this.lastCursor);
+        if (resData.updatedCursor > activeCursor) {
+          activeCursor = resData.updatedCursor;
+          await this.storage.setMeta(cursorMetaKey, activeCursor);
+          if (!isFiltered) {
+            this.lastCursor = activeCursor;
+          }
         }
 
         const nextBatch = await this.queue.getNextBatch(this.batchSize, checkNow);
-        continueLoop = nextBatch.length > 0 || resData.hasMore;
+        const nonAdvancingEmptyPage =
+          resData.hasMore && activeCursor <= prevCursor && resData.remoteChanges.length === 0;
+        continueLoop = nextBatch.length > 0 || (resData.hasMore && !nonAdvancingEmptyPage);
       }
 
       const latencyMs = Math.round((performance.now() - started) * 100) / 100;

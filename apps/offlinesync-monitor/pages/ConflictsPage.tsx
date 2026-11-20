@@ -46,6 +46,7 @@ export const ConflictsPage: React.FC = () => {
     try {
       await monitorApi.resolveConflict(selected.conflictId, {
         resolutionChoice: choice,
+        expectedServerVersion: selected.remoteVersion,
         actor: 'monitor-operator',
         note: resolutionNote.trim() || `Operator chose ${choice}`,
       });

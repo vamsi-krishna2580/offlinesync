@@ -11,6 +11,8 @@ import {
   ScrollText,
 } from 'lucide-react';
 
+import { getMonitorEventsUrl } from '../api/monitorApi';
+
 const NAV_ITEMS = [
   { to: '/monitor', label: 'Overview', icon: Activity, end: true },
   { to: '/monitor/devices', label: 'Devices', icon: Cpu, end: false },
@@ -26,7 +28,7 @@ export const MonitorLayout: React.FC = () => {
   const [streamConnected, setStreamConnected] = useState(false);
 
   useEffect(() => {
-    const es = new EventSource('/api/monitor/events');
+    const es = new EventSource(getMonitorEventsUrl());
     es.onopen = () => setStreamConnected(true);
     es.onerror = () => setStreamConnected(false);
     return () => es.close();

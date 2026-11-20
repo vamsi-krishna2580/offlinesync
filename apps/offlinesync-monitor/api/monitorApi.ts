@@ -10,10 +10,46 @@ import type {
 } from '../../../packages/offlinesync-types';
 import type { Product } from '../../../backend/shop-adapter/types';
 
+const DEFAULT_LOCAL_MONITOR_TOKEN = 'offlinesync-local-monitor-token';
+
+export function getMonitorToken(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const override = window.localStorage.getItem('offlinesync_monitor_token');
+      if (override && override.trim()) return override.trim();
+    } catch {
+      // ignore storage access issues
+    }
+  }
+  const envToken = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    ?.VITE_MONITOR_TOKEN;
+  return envToken && envToken.trim() ? envToken.trim() : DEFAULT_LOCAL_MONITOR_TOKEN;
+}
+
+export function getMonitorEventsUrl(): string {
+  return `/api/monitor/events?token=${encodeURIComponent(getMonitorToken())}`;
+}
+
+export function getExperimentsExportCsvUrl(): string {
+  return `/api/monitor/experiments/export.csv?token=${encodeURIComponent(getMonitorToken())}`;
+}
+
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: 'no-store' });
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      'X-Monitor-Token': getMonitorToken(),
+    },
+  });
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} on ${url}`);
+    let msg = `HTTP ${res.status} on ${url}`;
+    try {
+      const parsed = (await res.json()) as { error?: string; code?: string };
+      if (parsed.error) msg = parsed.code ? `[${parsed.code}] ${parsed.error}` : parsed.error;
+    } catch {
+      // keep default
+    }
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }
@@ -21,14 +57,17 @@ async function getJson<T>(url: string): Promise<T> {
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Monitor-Token': getMonitorToken(),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try {
-      const parsed = (await res.json()) as { error?: string };
-      if (parsed.error) msg = parsed.error;
+      const parsed = (await res.json()) as { error?: string; code?: string };
+      if (parsed.error) msg = parsed.code ? `[${parsed.code}] ${parsed.error}` : parsed.error;
     } catch {
       // keep status
     }
@@ -78,7 +117,7 @@ export const monitorApi = {
     conflictId: string,
     payload: ResolveConflictRequest
   ): Promise<ConflictRecord> {
-    const data = await postJson<{ conflict: ConflictRecord }>(
+    const data = await postJson<{ conflict: ConflictRecord; idempotentReplay?: boolean }>(
       `/api/sync/conflicts/${encodeURIComponent(conflictId)}/resolve`,
       payload
     );
@@ -135,7 +174,7 @@ export const monitorApi = {
   },
 
   subscribeEvents(onEvent: (evt: SyncEventRecord) => void): () => void {
-    const es = new EventSource('/api/monitor/events');
+    const es = new EventSource(getMonitorEventsUrl());
     es.addEventListener('sync_event', (msg) => {
       try {
         const parsed = JSON.parse((msg as MessageEvent).data) as SyncEventRecord;

@@ -32,7 +32,7 @@ async function startServer(): Promise<void> {
   });
 
   const gracefulShutdown = () => {
-    store.flushSync();
+    store.close();
     server.close(() => process.exit(0));
   };
 

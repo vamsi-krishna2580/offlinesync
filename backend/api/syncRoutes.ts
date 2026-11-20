@@ -1,16 +1,46 @@
 import { Router } from 'express';
-import type {
-  RegisterDeviceRequest,
-  ResolveConflictRequest,
-  SyncProcessRequest,
-  SyncPullRequest,
-  SyncPushRequest,
-} from '../../packages/offlinesync-types';
+import type { SyncProcessRequest, SyncPushRequest } from '../../packages/offlinesync-types';
+import { ConflictResolutionError } from '../offlinesync-core/ConflictManager';
+import { DeviceAuthError } from '../offlinesync-core/DeviceRegistry';
 import type { SyncCoreEngine } from '../offlinesync-core/SyncCoreEngine';
+import { PersistenceError } from '../persistence/DocumentStore';
+import {
+  extractDeviceToken,
+  isMonitorAuthorized,
+  isValidId,
+  requireMonitorAuth,
+  sendApiError,
+  validateRegisterDeviceBody,
+  validateResolveConflictBody,
+  validateSyncPullBody,
+  validateSyncPushOrProcessBody,
+} from './validation';
+
+function handleRouteError(res: import('express').Response, err: unknown): void {
+  if (err instanceof DeviceAuthError) {
+    sendApiError(res, err.statusCode, err.code, err.message);
+    return;
+  }
+  if (err instanceof ConflictResolutionError) {
+    sendApiError(res, err.statusCode, err.code, err.message);
+    return;
+  }
+  if (err instanceof PersistenceError) {
+    sendApiError(res, 503, 'PERSISTENCE_FAILURE', err.message);
+    return;
+  }
+  sendApiError(
+    res,
+    500,
+    'INTERNAL_ERROR',
+    err instanceof Error ? err.message : 'Unexpected server error'
+  );
+}
 
 export function createSyncRouter(core: SyncCoreEngine): Router {
   const router = Router();
 
+  // Lightweight unauthenticated reachability probe (exposes no sensitive data)
   router.get('/status', (_req, res) => {
     res.json({
       status: 'OK',
@@ -19,56 +49,137 @@ export function createSyncRouter(core: SyncCoreEngine): Router {
     });
   });
 
+  // Device registration: issues per-device X-Device-Token; re-registering existing ID requires token
   router.post('/register-device', (req, res) => {
-    const body = req.body as RegisterDeviceRequest;
-    if (!body?.deviceId || !body?.appId) {
-      res.status(400).json({ error: 'deviceId and appId are required' });
+    const validated = validateRegisterDeviceBody(req.body, core);
+    if (!validated.ok || !validated.value) {
+      sendApiError(
+        res,
+        validated.statusCode ?? 400,
+        validated.code ?? 'VALIDATION_ERROR',
+        validated.error ?? 'Invalid request',
+        validated.details
+      );
       return;
     }
-    const result = core.registerDevice(body);
-    res.json(result);
+
+    try {
+      const presentedToken = extractDeviceToken(req);
+      const result = core.registerDevice(validated.value, presentedToken);
+      res.json(result);
+    } catch (err) {
+      handleRouteError(res, err);
+    }
   });
 
   router.post('/push', (req, res) => {
-    const body = req.body as SyncPushRequest;
-    if (!body?.deviceId || !body?.appId || !Array.isArray(body.operations)) {
-      res.status(400).json({ error: 'deviceId, appId, and operations array are required' });
+    const validated = validateSyncPushOrProcessBody(req.body, core, false);
+    if (!validated.ok || !validated.value) {
+      sendApiError(
+        res,
+        validated.statusCode ?? 400,
+        validated.code ?? 'VALIDATION_ERROR',
+        validated.error ?? 'Invalid push request',
+        validated.details
+      );
       return;
     }
-    const bytesSent = Buffer.byteLength(JSON.stringify(body), 'utf-8');
-    const result = core.push(body, bytesSent);
-    res.json(result);
+
+    try {
+      const payload = validated.value as SyncPushRequest;
+      core.devices.authenticateDevice(
+        payload.deviceId,
+        payload.appId,
+        extractDeviceToken(req)
+      );
+      const bytesSent = Buffer.byteLength(JSON.stringify(payload), 'utf-8');
+      const result = core.push(payload, bytesSent);
+      res.json(result);
+    } catch (err) {
+      handleRouteError(res, err);
+    }
   });
 
   router.post('/pull', (req, res) => {
-    const body = req.body as SyncPullRequest;
-    if (!body?.deviceId || !body?.appId) {
-      res.status(400).json({ error: 'deviceId and appId are required' });
+    const validated = validateSyncPullBody(req.body, core);
+    if (!validated.ok || !validated.value) {
+      sendApiError(
+        res,
+        validated.statusCode ?? 400,
+        validated.code ?? 'VALIDATION_ERROR',
+        validated.error ?? 'Invalid pull request',
+        validated.details
+      );
       return;
     }
-    const result = core.pull(body);
-    res.json(result);
+
+    try {
+      core.devices.authenticateDevice(
+        validated.value.deviceId,
+        validated.value.appId,
+        extractDeviceToken(req)
+      );
+      const result = core.pull(validated.value);
+      res.json(result);
+    } catch (err) {
+      handleRouteError(res, err);
+    }
   });
 
   router.post('/process', (req, res) => {
-    const body = req.body as SyncProcessRequest;
-    if (!body?.deviceId || !body?.appId || !Array.isArray(body.operations)) {
-      res.status(400).json({ error: 'deviceId, appId, and operations array are required' });
+    const validated = validateSyncPushOrProcessBody(req.body, core, true);
+    if (!validated.ok || !validated.value) {
+      sendApiError(
+        res,
+        validated.statusCode ?? 400,
+        validated.code ?? 'VALIDATION_ERROR',
+        validated.error ?? 'Invalid process request',
+        validated.details
+      );
       return;
     }
-    const bytesSent = Buffer.byteLength(JSON.stringify(body), 'utf-8');
-    const result = core.process(body, bytesSent);
-    res.json(result);
+
+    try {
+      const payload = validated.value as SyncProcessRequest;
+      core.devices.authenticateDevice(
+        payload.deviceId,
+        payload.appId,
+        extractDeviceToken(req)
+      );
+      const bytesSent = Buffer.byteLength(JSON.stringify(payload), 'utf-8');
+      const result = core.process(payload, bytesSent);
+      res.json(result);
+    } catch (err) {
+      handleRouteError(res, err);
+    }
   });
 
-  router.get('/devices', (_req, res) => {
+  // Protected Monitor / Admin introspection endpoints
+  router.get('/devices', requireMonitorAuth, (_req, res) => {
     res.json({ devices: core.devices.listAll() });
   });
 
+  // Device detail: accessible by authorized Monitor OR by the owning device presenting its own token
   router.get('/devices/:id', (req, res) => {
-    const device = core.devices.getById(req.params.id);
+    const deviceId = req.params.id;
+    if (!isValidId(deviceId)) {
+      sendApiError(res, 400, 'INVALID_DEVICE_ID', 'Malformed device ID');
+      return;
+    }
+
+    const monitorOk = isMonitorAuthorized(req);
+    if (!monitorOk) {
+      try {
+        core.devices.authenticateDevice(deviceId, null, extractDeviceToken(req));
+      } catch (err) {
+        handleRouteError(res, err);
+        return;
+      }
+    }
+
+    const device = core.devices.getById(deviceId);
     if (!device) {
-      res.status(404).json({ error: 'Device not found' });
+      sendApiError(res, 404, 'DEVICE_NOT_FOUND', `Device "${deviceId}" not found`);
       return;
     }
     const operations = core.idempotency.listOperations({ deviceId: device.deviceId, limit: 100 });
@@ -77,39 +188,56 @@ export function createSyncRouter(core: SyncCoreEngine): Router {
     res.json({ device, operations, sessions, logs });
   });
 
-  router.get('/operations', (req, res) => {
+  router.get('/operations', requireMonitorAuth, (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
     const entityType = typeof req.query.entityType === 'string' ? req.query.entityType : undefined;
-    const operations = core.idempotency.listOperations({ status, deviceId, entityType, limit: 250 });
+    const operations = core.idempotency.listOperations({
+      status,
+      deviceId,
+      entityType,
+      limit: 250,
+    });
     res.json({ operations });
   });
 
-  router.get('/sessions', (req, res) => {
+  router.get('/sessions', requireMonitorAuth, (req, res) => {
     const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
     const sessions = core.listSessions({ deviceId, limit: 150 });
     res.json({ sessions });
   });
 
-  router.get('/conflicts', (req, res) => {
+  router.get('/conflicts', requireMonitorAuth, (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const entityType = typeof req.query.entityType === 'string' ? req.query.entityType : undefined;
     const conflicts = core.conflicts.listAll({ status, entityType });
     res.json({ conflicts });
   });
 
-  router.post('/conflicts/:id/resolve', (req, res) => {
-    const body = req.body as ResolveConflictRequest;
-    if (!body?.resolutionChoice) {
-      res.status(400).json({ error: 'resolutionChoice is required' });
+  router.post('/conflicts/:id/resolve', requireMonitorAuth, (req, res) => {
+    const conflictId = req.params.id;
+    if (!isValidId(conflictId)) {
+      sendApiError(res, 400, 'INVALID_CONFLICT_ID', 'Malformed conflict ID');
       return;
     }
-    const resolved = core.resolveConflict(req.params.id, body);
-    if (!resolved) {
-      res.status(404).json({ error: 'Conflict not found' });
+    const validated = validateResolveConflictBody(req.body);
+    if (!validated.ok || !validated.value) {
+      sendApiError(
+        res,
+        validated.statusCode ?? 400,
+        validated.code ?? 'VALIDATION_ERROR',
+        validated.error ?? 'Invalid conflict resolution payload',
+        validated.details
+      );
       return;
     }
-    res.json({ conflict: resolved });
+
+    try {
+      const result = core.resolveConflict(conflictId, validated.value);
+      res.json(result);
+    } catch (err) {
+      handleRouteError(res, err);
+    }
   });
 
   return router;

@@ -32,6 +32,7 @@ function createStubTransport(options?: { failProcess?: boolean }): SyncTransport
             lastCursor: 0,
             pendingCount: 0,
           },
+          deviceToken: `tok-${req.deviceId}`,
           serverTimestamp: new Date().toISOString(),
           currentCursor: cursor,
         },
@@ -78,6 +79,7 @@ function createStubTransport(options?: { failProcess?: boolean }): SyncTransport
             },
           ],
           updatedCursor: cursor + 1,
+          latestAppCursor: cursor + 1,
           hasMore: false,
           serverTimestamp: new Date().toISOString(),
         },
@@ -115,6 +117,7 @@ function createStubTransport(options?: { failProcess?: boolean }): SyncTransport
             },
           ],
           updatedCursor: cursor,
+          latestAppCursor: cursor,
           hasMore: false,
           serverTimestamp: new Date().toISOString(),
           durationMs: 2,
@@ -128,7 +131,7 @@ function createStubTransport(options?: { failProcess?: boolean }): SyncTransport
 }
 
 describe('OfflineSync Client Engine (Unit Tests)', () => {
-  it('persists cached entities and queued operations in IndexedDB across simulated reloads', async () => {
+  it('persists cached entities, device token, and queued operations in IndexedDB across simulated reloads', async () => {
     const dbName = `test_dexie_${Date.now()}`;
     const storage1 = new DexieStorageAdapter(dbName);
     const engine1 = createOfflineSync({
@@ -155,19 +158,28 @@ describe('OfflineSync Client Engine (Unit Tests)', () => {
     await storage1.close();
 
     // Simulate page reload by instantiating a brand new DexieStorageAdapter against same DB
+    let attachedToken: string | null = null;
+    const transport2: SyncTransport = {
+      ...createStubTransport(),
+      setDeviceToken(tok) {
+        attachedToken = tok;
+      },
+    };
     const storage2 = new DexieStorageAdapter(dbName);
     const engine2 = createOfflineSync({
       appId: 'test-app',
       storage: storage2,
-      transport: createStubTransport(),
+      transport: transport2,
       autoSyncOnReconnect: false,
     });
-
+    engine2.setSimulatedOffline(true);
     await engine2.initialize();
+
     const cachedProduct = await engine2.getLocalEntity<{ price: number }>('product', 'P101');
     const pendingOps = await engine2.getPendingOperations();
 
     expect(engine2.getDeviceId()).toBe('dev-persist-1');
+    expect(attachedToken).toBe('tok-dev-persist-1');
     expect(cachedProduct?.data.price).toBe(249);
     expect(pendingOps).toHaveLength(1);
     expect(pendingOps[0].operationType).toBe('CART_ITEM_ADD');
@@ -268,6 +280,135 @@ describe('OfflineSync Client Engine (Unit Tests)', () => {
     const pulled = await engine.getLocalEntity<{ name: string }>('product', 'P999');
     expect(pulled?.data.name).toBe('Pulled Record');
     expect(await engine.getPendingOperations()).toHaveLength(0);
+
+    engine.destroy();
+  });
+
+  it('handles interrupted pull pagination safely without skipping changes or advancing past unapplied pages', async () => {
+    const storage = new MemoryStorageAdapter();
+    let failPage2Once = true;
+    const requestedCursors: number[] = [];
+
+    const baseStub = createStubTransport();
+    const pagedTransport: SyncTransport = {
+      ...baseStub,
+      async pull(req: SyncPullRequest) {
+        requestedCursors.push(req.lastCursor);
+        if (req.lastCursor === 0) {
+          return {
+            data: {
+              sessionId: null,
+              changes: [
+                {
+                  cursor: 1,
+                  entityType: 'product',
+                  entityId: 'P1',
+                  version: 1,
+                  changeType: 'UPSERT',
+                  data: { productId: 'P1', name: 'Page 1 Item' },
+                  updatedAt: new Date().toISOString(),
+                },
+              ],
+              updatedCursor: 1,
+              latestAppCursor: 2,
+              hasMore: true,
+              serverTimestamp: new Date().toISOString(),
+            },
+            bytesSent: 20,
+            bytesReceived: 80,
+            latencyMs: 1,
+          };
+        }
+        if (req.lastCursor === 1 && failPage2Once) {
+          failPage2Once = false;
+          throw new Error('Connection reset before page 2');
+        }
+        return {
+          data: {
+            sessionId: null,
+            changes: [
+              {
+                cursor: 2,
+                entityType: 'product',
+                entityId: 'P2',
+                version: 1,
+                changeType: 'UPSERT',
+                data: { productId: 'P2', name: 'Page 2 Item' },
+                updatedAt: new Date().toISOString(),
+              },
+            ],
+            updatedCursor: 2,
+            latestAppCursor: 2,
+            hasMore: false,
+            serverTimestamp: new Date().toISOString(),
+          },
+          bytesSent: 20,
+          bytesReceived: 80,
+          latencyMs: 1,
+        };
+      },
+    };
+
+    const engine = createOfflineSync({
+      appId: 'test-app',
+      deviceId: 'dev-paged',
+      storage,
+      transport: pagedTransport,
+      autoSyncOnReconnect: false,
+    });
+    await engine.initialize();
+
+    await expect(engine.pullRemoteChanges()).rejects.toThrow('Connection reset before page 2');
+
+    // Page 1 was applied and persisted; cursor must be 1 (NOT 0 and NOT 2)
+    expect((await engine.getStatus()).lastCursor).toBe(1);
+    expect(await engine.getLocalEntity('product', 'P1')).toBeDefined();
+    expect(await engine.getLocalEntity('product', 'P2')).toBeUndefined();
+
+    // Retry pull resumes at cursor 1 and applies page 2 cleanly
+    const resumed = await engine.pullRemoteChanges();
+    expect(resumed.updatedCursor).toBe(2);
+    expect(await engine.getLocalEntity('product', 'P2')).toBeDefined();
+    expect(requestedCursors).toEqual([0, 1, 1]);
+
+    engine.destroy();
+  });
+
+  it('never advances cursor when applying a remote change fails locally, and isolates filtered pull cursors', async () => {
+    const storage = new MemoryStorageAdapter();
+    let shouldThrowOnApply = true;
+
+    const engine = createOfflineSync({
+      appId: 'test-app',
+      deviceId: 'dev-cursor-safe',
+      storage,
+      transport: createStubTransport(),
+      autoSyncOnReconnect: false,
+    });
+    engine.registerAdapter({
+      name: 'faulty-adapter',
+      onRemoteChangeApplied() {
+        if (shouldThrowOnApply) {
+          throw new Error('Local storage quota exceeded during apply');
+        }
+      },
+    });
+    await engine.initialize();
+
+    // Pull fails during applyRemoteChange -> cursor MUST stay 0!
+    await expect(engine.pullRemoteChanges()).rejects.toThrow('Local storage quota exceeded');
+    expect((await engine.getStatus()).lastCursor).toBe(0);
+
+    // Once local error clears, filtered pull advances only its isolated filter cursor, NOT unfiltered lastCursor
+    shouldThrowOnApply = false;
+    const filtered = await engine.pullRemoteChanges(['product']);
+    expect(filtered.updatedCursor).toBe(1);
+    expect((await engine.getStatus()).lastCursor).toBe(0);
+
+    // Unfiltered pull then advances main lastCursor
+    const unfiltered = await engine.pullRemoteChanges();
+    expect(unfiltered.updatedCursor).toBe(1);
+    expect((await engine.getStatus()).lastCursor).toBe(1);
 
     engine.destroy();
   });
