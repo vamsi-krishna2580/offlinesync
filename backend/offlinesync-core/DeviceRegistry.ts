@@ -81,10 +81,17 @@ export class DeviceRegistry {
         );
       }
 
-      if (!presentedToken || !safeEqualHex(existing.tokenHash, hashToken(presentedToken))) {
+      if (!presentedToken) {
         throw new DeviceAuthError(
           `Device "${req.deviceId}" is already registered; valid X-Device-Token required to re-register`,
           'DEVICE_TOKEN_REQUIRED',
+          401
+        );
+      }
+      if (!safeEqualHex(existing.tokenHash, hashToken(presentedToken))) {
+        throw new DeviceAuthError(
+          `Invalid X-Device-Token for registered device "${req.deviceId}"`,
+          'DEVICE_TOKEN_INVALID',
           401
         );
       }

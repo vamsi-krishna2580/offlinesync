@@ -1,0 +1,422 @@
+{
+  "version": 2,
+  "savedAt": "2026-11-20T19:19:59.101Z",
+  "checksum": "4dd358931128d3c71fac109c9b90e1942179918c14697fbe8afbc09700fc3ae3",
+  "collections": {
+    "devices": [
+      {
+        "deviceId": "dev-5aa71121-758e-460f-a5bb-772b8977cd3c",
+        "deviceName": "OfflineShop Web (Linux armv81)",
+        "appId": "offline-shop",
+        "platform": "web-indexeddb-dexie",
+        "registeredAt": "2026-11-20T19:19:59.004Z",
+        "lastSyncAt": null,
+        "lastSeenAt": "2026-11-20T19:19:59.004Z",
+        "connectionStatus": "ONLINE",
+        "lastCursor": 0,
+        "pendingCount": 0,
+        "tokenHash": "0db0a39b829e193e57f5e0a8164ede76bfcd25091a902b241f6449781cace716"
+      }
+    ],
+    "sync_operations": [],
+    "sync_sessions": [],
+    "conflicts": [],
+    "sync_events": [
+      {
+        "eventId": "evt-a2019abf-532e-4b43-a180-eeabc8026c8f",
+        "deviceId": "dev-5aa71121-758e-460f-a5bb-772b8977cd3c",
+        "appId": "offline-shop",
+        "sessionId": null,
+        "eventType": "DEVICE_REGISTERED",
+        "timestamp": "2026-11-20T19:19:59.012Z",
+        "severity": "INFO",
+        "metadata": {
+          "deviceName": "OfflineShop Web (Linux armv81)",
+          "platform": "web-indexeddb-dexie",
+          "isNew": true
+        }
+      }
+    ],
+    "sync_changelog": [
+      {
+        "changeId": "chg-offline-shop-1",
+        "appId": "offline-shop",
+        "cursor": 1,
+        "entityType": "product",
+        "entityId": "P101",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P101",
+          "sku": "OS-KB-650",
+          "name": "Milled 65 Wireless Keyboard",
+          "category": "Workspace",
+          "tagline": "CNC anodized aluminum chassis with tri-mode low-latency wireless",
+          "description": "Machined from a solid block of 6063 aluminum with gasket-mounted tactile switches, hot-swap PCB, and 180-hour battery life. Designed for quiet tactile precision at home or in transit.",
+          "price": 249,
+          "stock": 18,
+          "imageUrl": "/src/assets/images/product_aluminum_keyboard_1795159062562.jpg",
+          "specs": {
+            "Layout": "65% ANSI",
+            "Chassis": "Bead-blasted 6063 Aluminum",
+            "Connectivity": "USB-C, Bluetooth 5.3, 2.4 GHz",
+            "Weight": "1,180 g"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-2",
+        "appId": "offline-shop",
+        "cursor": 2,
+        "entityType": "product",
+        "entityId": "P102",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P102",
+          "sku": "OS-AU-900",
+          "name": "Reference Open-Back Studio Headphones",
+          "category": "Audio",
+          "tagline": "Planar magnetic transducers with brushed stainless steel yoke",
+          "description": "Hand-matched 50mm planar drivers delivering neutral studio acoustics with breathable memory-foam ear cushions and detachable braided OFC cable.",
+          "price": 389,
+          "stock": 12,
+          "imageUrl": "/src/assets/images/product_studio_headphones_1795159063415.jpg",
+          "specs": {
+            "Driver": "50 mm Planar Magnetic",
+            "Impedance": "32 Ohms",
+            "Frequency": "10 Hz – 42 kHz",
+            "Weight": "310 g"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-3",
+        "appId": "offline-shop",
+        "cursor": 3,
+        "entityType": "product",
+        "entityId": "P103",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P103",
+          "sku": "OS-HM-220",
+          "name": "Kuro Stoneware Pour-Over Carafe",
+          "category": "Homeware",
+          "tagline": "Hand-thrown matte speckled stoneware with solid walnut collar",
+          "description": "Spiral-ribbed dripper geometry calibrated for even extraction paired with a thermal-retaining stoneware server and removable American black walnut grip.",
+          "price": 94,
+          "stock": 26,
+          "imageUrl": "/src/assets/images/product_ceramic_carafe_1795159061203.jpg",
+          "specs": {
+            "Capacity": "600 ml (2–4 cups)",
+            "Material": "High-fire Speckled Stoneware",
+            "Collar": "Oiled American Walnut",
+            "Filter": "V60 Size 02"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-4",
+        "appId": "offline-shop",
+        "cursor": 4,
+        "entityType": "product",
+        "entityId": "P104",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P104",
+          "sku": "OS-CR-410",
+          "name": "Arcane 22L Waxed Canvas Pack",
+          "category": "Carry",
+          "tagline": "Weatherproof 18oz dry-waxed canvas with anodized aluminum hook",
+          "description": "Structured roll-top commuter pack with suspended 16-inch laptop sleeve, magnetic quick-access front pocket, and dual side bottle holsters built for unpredictable commutes.",
+          "price": 215,
+          "stock": 9,
+          "imageUrl": "/src/assets/images/product_commuter_backpack_1795159068179.jpg",
+          "specs": {
+            "Volume": "22 Liters (Expandable to 26L)",
+            "Shell": "18 oz Scottish Dry-Waxed Canvas",
+            "Laptop": "Fits up to 16-inch",
+            "Hardware": "Anodized Aluminum G-Hook"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-5",
+        "appId": "offline-shop",
+        "cursor": 5,
+        "entityType": "product",
+        "entityId": "P105",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P105",
+          "sku": "OS-LT-730",
+          "name": "Cantilever Architectural Desk Lamp",
+          "category": "Lighting",
+          "tagline": "Counterbalanced graphite arm with machined solid brass joints",
+          "description": "High-CRI 97+ glare-free optical diffuser on a precision friction-hinge cantilever arm. Continuous rotary dimming from 2700K warm ambient to 4500K task illumination.",
+          "price": 279,
+          "stock": 7,
+          "imageUrl": "/src/assets/images/product_architect_lamp_1795159061792.jpg",
+          "specs": {
+            "CRI": "97+ Full Spectrum LED",
+            "ColorTemp": "2700K – 4500K Stepless",
+            "Reach": "580 mm Articulated Arm",
+            "Finish": "Graphite Anodized & Brushed Brass"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-6",
+        "appId": "offline-shop",
+        "cursor": 6,
+        "entityType": "product",
+        "entityId": "P106",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "productId": "P106",
+          "sku": "OS-KB-651",
+          "name": "Milled 65 Charcoal Studio Edition",
+          "category": "Workspace",
+          "tagline": "Dark anodized acoustic desk keyboard with PBT dye-sub keycaps",
+          "description": "Limited matte charcoal finish of our flagship 65% mechanical board, tuned with acoustic poron plate foam and factory-lubed linear switches for deep muted sound.",
+          "price": 269,
+          "stock": 5,
+          "imageUrl": "/src/assets/images/hero_offlineshop_collection_1795159061207.jpg",
+          "specs": {
+            "Layout": "65% ANSI",
+            "Switches": "Linear 45g Factory Lubed",
+            "Battery": "4000 mAh Internal Li-Po",
+            "Weight": "1,210 g"
+          },
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-7",
+        "appId": "offline-shop",
+        "cursor": 7,
+        "entityType": "address",
+        "entityId": "ADDR-HOME",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "addressId": "ADDR-HOME",
+          "label": "Home Studio",
+          "recipientName": "Ananya Rao",
+          "phone": "+1 (415) 555-0192",
+          "street": "742 Cedar Ridge Avenue, Apt 4B",
+          "city": "San Francisco",
+          "state": "CA",
+          "postalCode": "94107",
+          "country": "United States",
+          "isDefault": true,
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      },
+      {
+        "changeId": "chg-offline-shop-8",
+        "appId": "offline-shop",
+        "cursor": 8,
+        "entityType": "address",
+        "entityId": "ADDR-LAB",
+        "version": 1,
+        "changeType": "UPSERT",
+        "data": {
+          "addressId": "ADDR-LAB",
+          "label": "Systems Research Lab",
+          "recipientName": "Ananya Rao",
+          "phone": "+1 (415) 555-0148",
+          "street": "1200 Innovation Way, Suite 310",
+          "city": "Palo Alto",
+          "state": "CA",
+          "postalCode": "94301",
+          "country": "United States",
+          "isDefault": false,
+          "version": 1,
+          "updatedAt": "2026-11-18T09:00:00.000Z"
+        },
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      }
+    ],
+    "sync_metadata": [
+      {
+        "key": "app_cursor:offline-shop",
+        "value": 8,
+        "updatedAt": "2026-11-20T19:19:44.770Z"
+      }
+    ],
+    "sync_experiments": [],
+    "products": [
+      {
+        "productId": "P101",
+        "sku": "OS-KB-650",
+        "name": "Milled 65 Wireless Keyboard",
+        "category": "Workspace",
+        "tagline": "CNC anodized aluminum chassis with tri-mode low-latency wireless",
+        "description": "Machined from a solid block of 6063 aluminum with gasket-mounted tactile switches, hot-swap PCB, and 180-hour battery life. Designed for quiet tactile precision at home or in transit.",
+        "price": 249,
+        "stock": 18,
+        "imageUrl": "/src/assets/images/product_aluminum_keyboard_1795159062562.jpg",
+        "specs": {
+          "Layout": "65% ANSI",
+          "Chassis": "Bead-blasted 6063 Aluminum",
+          "Connectivity": "USB-C, Bluetooth 5.3, 2.4 GHz",
+          "Weight": "1,180 g"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "productId": "P102",
+        "sku": "OS-AU-900",
+        "name": "Reference Open-Back Studio Headphones",
+        "category": "Audio",
+        "tagline": "Planar magnetic transducers with brushed stainless steel yoke",
+        "description": "Hand-matched 50mm planar drivers delivering neutral studio acoustics with breathable memory-foam ear cushions and detachable braided OFC cable.",
+        "price": 389,
+        "stock": 12,
+        "imageUrl": "/src/assets/images/product_studio_headphones_1795159063415.jpg",
+        "specs": {
+          "Driver": "50 mm Planar Magnetic",
+          "Impedance": "32 Ohms",
+          "Frequency": "10 Hz – 42 kHz",
+          "Weight": "310 g"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "productId": "P103",
+        "sku": "OS-HM-220",
+        "name": "Kuro Stoneware Pour-Over Carafe",
+        "category": "Homeware",
+        "tagline": "Hand-thrown matte speckled stoneware with solid walnut collar",
+        "description": "Spiral-ribbed dripper geometry calibrated for even extraction paired with a thermal-retaining stoneware server and removable American black walnut grip.",
+        "price": 94,
+        "stock": 26,
+        "imageUrl": "/src/assets/images/product_ceramic_carafe_1795159061203.jpg",
+        "specs": {
+          "Capacity": "600 ml (2–4 cups)",
+          "Material": "High-fire Speckled Stoneware",
+          "Collar": "Oiled American Walnut",
+          "Filter": "V60 Size 02"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "productId": "P104",
+        "sku": "OS-CR-410",
+        "name": "Arcane 22L Waxed Canvas Pack",
+        "category": "Carry",
+        "tagline": "Weatherproof 18oz dry-waxed canvas with anodized aluminum hook",
+        "description": "Structured roll-top commuter pack with suspended 16-inch laptop sleeve, magnetic quick-access front pocket, and dual side bottle holsters built for unpredictable commutes.",
+        "price": 215,
+        "stock": 9,
+        "imageUrl": "/src/assets/images/product_commuter_backpack_1795159068179.jpg",
+        "specs": {
+          "Volume": "22 Liters (Expandable to 26L)",
+          "Shell": "18 oz Scottish Dry-Waxed Canvas",
+          "Laptop": "Fits up to 16-inch",
+          "Hardware": "Anodized Aluminum G-Hook"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "productId": "P105",
+        "sku": "OS-LT-730",
+        "name": "Cantilever Architectural Desk Lamp",
+        "category": "Lighting",
+        "tagline": "Counterbalanced graphite arm with machined solid brass joints",
+        "description": "High-CRI 97+ glare-free optical diffuser on a precision friction-hinge cantilever arm. Continuous rotary dimming from 2700K warm ambient to 4500K task illumination.",
+        "price": 279,
+        "stock": 7,
+        "imageUrl": "/src/assets/images/product_architect_lamp_1795159061792.jpg",
+        "specs": {
+          "CRI": "97+ Full Spectrum LED",
+          "ColorTemp": "2700K – 4500K Stepless",
+          "Reach": "580 mm Articulated Arm",
+          "Finish": "Graphite Anodized & Brushed Brass"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "productId": "P106",
+        "sku": "OS-KB-651",
+        "name": "Milled 65 Charcoal Studio Edition",
+        "category": "Workspace",
+        "tagline": "Dark anodized acoustic desk keyboard with PBT dye-sub keycaps",
+        "description": "Limited matte charcoal finish of our flagship 65% mechanical board, tuned with acoustic poron plate foam and factory-lubed linear switches for deep muted sound.",
+        "price": 269,
+        "stock": 5,
+        "imageUrl": "/src/assets/images/hero_offlineshop_collection_1795159061207.jpg",
+        "specs": {
+          "Layout": "65% ANSI",
+          "Switches": "Linear 45g Factory Lubed",
+          "Battery": "4000 mAh Internal Li-Po",
+          "Weight": "1,210 g"
+        },
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      }
+    ],
+    "carts": [],
+    "wishlists": [],
+    "addresses": [
+      {
+        "addressId": "ADDR-HOME",
+        "label": "Home Studio",
+        "recipientName": "Ananya Rao",
+        "phone": "+1 (415) 555-0192",
+        "street": "742 Cedar Ridge Avenue, Apt 4B",
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94107",
+        "country": "United States",
+        "isDefault": true,
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      },
+      {
+        "addressId": "ADDR-LAB",
+        "label": "Systems Research Lab",
+        "recipientName": "Ananya Rao",
+        "phone": "+1 (415) 555-0148",
+        "street": "1200 Innovation Way, Suite 310",
+        "city": "Palo Alto",
+        "state": "CA",
+        "postalCode": "94301",
+        "country": "United States",
+        "isDefault": false,
+        "version": 1,
+        "updatedAt": "2026-11-18T09:00:00.000Z"
+      }
+    ],
+    "orders": []
+  }
+}
